@@ -1,0 +1,57 @@
+# What to search for and where. Edit freely — the pipeline reloads this each run.
+
+location:
+  postcode: "L1"        # centre of the collection radius (Liverpool city centre)
+  country: GB
+  radius_km: 25         # ~30 min drive
+
+marketplace: EBAY_GB
+
+# eBay item condition IDs to include:
+#   3000 = Used
+#   7000 = For parts or not working
+# (1000 New / 1500 New other / 2500 Seller refurbished are deliberately excluded)
+condition_ids: [3000, 7000]
+
+# Delete listings not seen in this many days (keeps the DB flat; eBay items
+# unseen this long are sold/ended).
+retention_days: 30
+
+# Each search hits eBay once per run. max_price is in GBP (server-side cap).
+searches:
+  - { query: "washing machine",         max_price: 50 }
+  - { query: "washing machine faulty",  max_price: 120 }   # explicitly-broken premium brands are worth more
+  - { query: "tumble dryer",            max_price: 40 }
+  - { query: "dishwasher",              max_price: 40 }
+  - { query: "fridge freezer",          max_price: 60 }
+  - { query: "american fridge freezer", max_price: 100 }
+  - { query: "range cooker",            max_price: 100 }
+  - { query: "oven",                    max_price: 50 }
+
+filters:
+  # Drop listings whose title contains any of these — mostly spare *parts* that
+  # match an appliance keyword but aren't a whole unit.
+  exclude_keywords:
+    - door seal
+    - spares kit
+    - drum paddle
+    - pcb
+    - spare part
+    - spares bundle
+    - handle
+    - knob
+    - shelf
+    - drawer
+  # Flag (🔧) listings whose title suggests an explicit fault — the repair sweet spot.
+  highlight_keywords:
+    - spares
+    - repair
+    - faulty
+    - broken
+    - not working
+    - fault
+    - spares or repairs
+    - needs
+    - leak
+    - error
+    - spares or repair
