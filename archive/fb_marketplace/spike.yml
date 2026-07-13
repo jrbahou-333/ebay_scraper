@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests
-      - run: mkdir -p out && SPIKE_OUT_DIR=out python spike/ci_check.py
+      - run: mkdir -p out && SPIKE_OUT_DIR=out python archive/fb_marketplace/ci_check.py
         env:
           FB_COOKIES: ${{ secrets.FB_COOKIES }}
       - uses: actions/upload-artifact@v4
