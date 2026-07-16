@@ -5,6 +5,7 @@ Run:
     python -m src.main --dry-run  # search + print only; no DB writes, no sends
 """
 
+import os
 import sys
 import time
 
@@ -23,9 +24,12 @@ def scrape(client: EbayClient, cfg: dict):
     kept, found, dropped = [], 0, 0
     searches = cfg["searches"]
     for i, s in enumerate(searches):
+        label = s.get("name") or s.get("query") or str(s.get("category_ids"))
         try:
             results = client.search(
-                s["query"],
+                category_ids=s["category_ids"],
+                query=s.get("query"),
+                label=label,
                 max_price=s["max_price"],
                 condition_ids=cfg["condition_ids"],
                 postcode=loc["postcode"],
@@ -33,16 +37,32 @@ def scrape(client: EbayClient, cfg: dict):
                 radius_km=loc["radius_km"],
             )
         except EbayError as e:
-            print(f"  ! search {s['query']!r} failed: {e}")
+            print(f"  ! search {label!r} failed: {e}")
             continue
         found += len(results)
         k, d = filters.apply(results, cfg.get("filters") or {})
         dropped += d
         kept.extend(k)
-        print(f"  {s['query']!r}: {len(results)} found, {d} dropped, {len(k)} kept")
+        print(f"  {label!r}: {len(results)} found, {d} dropped, {len(k)} kept")
         if i < len(searches) - 1:
             time.sleep(0.3)  # be polite; well under any rate limit
     return kept, found, dropped
+
+
+def make_client(cfg: dict) -> EbayClient:
+    """Build the eBay client from whatever auth is available.
+
+    Prefers a static EBAY_OAUTH_TOKEN (handy for validating before the Cert ID /
+    client secret exists); otherwise uses OAuth client-credentials, which the
+    scheduled job relies on since it mints a fresh token every run.
+    """
+    marketplace = cfg.get("marketplace", "EBAY_GB")
+    token = os.environ.get("EBAY_OAUTH_TOKEN")
+    if token:
+        print("eBay auth: static EBAY_OAUTH_TOKEN")
+        return EbayClient(marketplace=marketplace, oauth_token=token)
+    creds = config.require_env("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET")
+    return EbayClient(creds["EBAY_CLIENT_ID"], creds["EBAY_CLIENT_SECRET"], marketplace)
 
 
 def dedupe(kept):
@@ -53,8 +73,8 @@ def dedupe(kept):
     return list(by_id.values())
 
 
-def run_dry(cfg, env):
-    client = EbayClient(env["EBAY_CLIENT_ID"], env["EBAY_CLIENT_SECRET"], cfg.get("marketplace", "EBAY_GB"))
+def run_dry(cfg):
+    client = make_client(cfg)
     print("DRY RUN — no DB writes, no Telegram sends\n")
     kept, found, dropped = scrape(client, cfg)
     unique = dedupe(kept)
@@ -66,8 +86,9 @@ def run_dry(cfg, env):
     return 0
 
 
-def run(cfg, env):
-    client = EbayClient(env["EBAY_CLIENT_ID"], env["EBAY_CLIENT_SECRET"], cfg.get("marketplace", "EBAY_GB"))
+def run(cfg):
+    env = config.require_env("DATABASE_URL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
+    client = make_client(cfg)
     notifier = Notifier(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"])
     conn = db.connect(env["DATABASE_URL"])
     try:
@@ -134,11 +155,9 @@ def main():
     dry = "--dry-run" in sys.argv
     config.load_env()
     cfg = config.load_config()
-    needed = ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"]
-    if not dry:
-        needed += ["DATABASE_URL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
-    env = config.require_env(*needed)
-    return run_dry(cfg, env) if dry else run(cfg, env)
+    # eBay auth (token or client id+secret) is validated in make_client; DB and
+    # Telegram creds are validated in run().
+    return run_dry(cfg) if dry else run(cfg)
 
 
 if __name__ == "__main__":

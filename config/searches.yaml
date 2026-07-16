@@ -1,9 +1,10 @@
 # What to search for and where. Edit freely — the pipeline reloads this each run.
 
 location:
-  postcode: "L1"        # centre of the collection radius (Liverpool city centre)
+  postcode: "L1 8JQ"    # centre of the collection radius (Liverpool city centre);
+                        # also sent to eBay as the buyer location so distances populate
   country: GB
-  radius_km: 25         # ~30 min drive
+  radius_km: 25         # ~30 min drive; enforced client-side (eBay ignores its own radius filter)
 
 marketplace: EBAY_GB
 
@@ -17,35 +18,138 @@ condition_ids: [3000, 7000]
 # unseen this long are sold/ended).
 retention_days: 30
 
-# Each search hits eBay once per run. max_price is in GBP (server-side cap).
+# Searches are driven by eBay CATEGORY, not keywords: a bare keyword search is
+# ~90% spare parts, whereas the category holds whole units. A `query` refines
+# within the category (ANDed). max_price is GBP.
+#
+# 20614 = "Vacuum Cleaners" (confirmed via eBay UK browse URLs). Vacuum *parts*
+# live in a separate category, so category-scoping keeps whole units — the same
+# win as the appliance searches. One live run is still wanted to tune the vacuum
+# exclude_keywords (below), as we did for appliances.
 searches:
-  - { query: "washing machine",         max_price: 50 }
-  - { query: "washing machine faulty",  max_price: 120 }   # explicitly-broken premium brands are worth more
-  - { query: "tumble dryer",            max_price: 40 }
-  - { query: "dishwasher",              max_price: 40 }
-  - { query: "fridge freezer",          max_price: 60 }
-  - { query: "american fridge freezer", max_price: 100 }
-  - { query: "range cooker",            max_price: 100 }
-  - { query: "oven",                    max_price: 50 }
+  - name: "Dyson vacuums"
+    category_ids: [20614]               # Vacuum Cleaners
+    query: "dyson"
+    max_price: 90                       # faulty/cheap cordless flip range; working ones sell £120+
+  - name: "Hoover & other vacuums"
+    category_ids: [20614]               # Vacuum Cleaners
+    query: "hoover"
+    max_price: 45
+
+# --- Previous appliance searches (preserved; uncomment to re-enable) ---
+#  - name: "Washing machines"
+#    category_ids: [71256, 71257]        # Washing Machines, Washer-Dryers
+#    max_price: 60
+#  - name: "Tumble dryers"
+#    category_ids: [71254]               # Tumble Dryers
+#    max_price: 45
+#  - name: "Dishwashers"
+#    category_ids: [116023]              # Dishwashers
+#    max_price: 45
+#  - name: "Fridge freezers"
+#    category_ids: [20713, 71262, 71260] # Fridge Freezers, Fridges, Freezers
+#    max_price: 70
+#  - name: "American fridge freezers"
+#    category_ids: [20713]
+#    query: "american"
+#    max_price: 120
+#  - name: "Cookers & ranges"
+#    category_ids: [71250, 258592]       # Cookers, Gas Ranges
+#    max_price: 110
+#  - name: "Ovens (built-in)"
+#    category_ids: [71318]               # Ovens
+#    max_price: 60
 
 filters:
-  # Drop listings whose title contains any of these — mostly spare *parts* that
-  # match an appliance keyword but aren't a whole unit.
+  # Backstop for the parts that share a category with whole units (an oven's
+  # "element", a dryer's "capacitor"). Only high-confidence part words that almost
+  # never appear in a whole-appliance title — deliberately NOT "pump" (heat-pump
+  # dryer), "fan" (fan oven), or "spares or repairs" (a whole faulty machine, which
+  # is exactly what we want and is a highlight below).
   exclude_keywords:
-    - door seal
-    - spares kit
-    - drum paddle
-    - pcb
+    # -- individual components / spare parts sharing a whole-appliance category --
     - spare part
+    - spares kit
     - spares bundle
-    - handle
+    - parts for
+    - freezer parts
+    - fridge parts
+    - element
+    - capacitor
+    - thermostat
+    - sensor
+    - terminal
+    - hinge
+    - latch
+    - module
+    - circuit board
+    - control board
+    - programmer
+    - cooling fan
+    - carbon brush
+    - drum paddle
+    - door seal
+    - kick plate
+    - valve
+    - hose
+    - pan support
+    - oven shelf
+    - oven rack
+    - steam oven shelf
+    - egg tray
+    - ice box
+    - door shelf
+    - door tray
+    - salad drawer
+    - wine rack
+    - water container
+    - dispenser drawer
+    - soap dispenser
+    - filter housing
+    - casing
+    - sump
+    - pcb
     - knob
-    - shelf
-    - drawer
+    - wiper blade
+    - print advert
+    - fridge magnet
+    # -- vacuum parts sharing the vacuum category (Dyson especially). NB: do NOT
+    #    exclude "motor" (Dyson Motorhead is a whole unit), "animal"/"fluffy"
+    #    (model names), or bare "battery"/"filter" (often whole units sold with
+    #    accessories). Needs a live tuning pass like the appliance list got. --
+    - brush bar
+    - brushbar
+    - soleplate
+    - hepa filter
+    - post-motor filter
+    - pre-motor filter
+    - cyclone assembly
+    - wand handle
+    - docking station
+    # -- novelty / non-white-goods that live in the fridge categories --
+    - mini fridge
+    - mini-fridge
+    - skincare
+    - beauty fridge
+    - beauty mini
+    - makeup
+    - cosmetic
+    - can cooler
+    - drinks cooler
+    - wine cooler
+    - bottle cooler
+    - mini bar
+    - thermoelectric
+    - cooler and warmer
+    - cooler & warmer
+    - car fridge
+    - coca-cola
+    - budweiser
   # Flag (🔧) listings whose title suggests an explicit fault — the repair sweet spot.
   highlight_keywords:
     - spares
     - repair
+    - repairs
     - faulty
     - broken
     - not working
@@ -54,4 +158,4 @@ filters:
     - needs
     - leak
     - error
-    - spares or repair
+    - no power

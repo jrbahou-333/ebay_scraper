@@ -1,9 +1,12 @@
 name: scrape
 
 on:
-  schedule:
-    - cron: "*/20 6-22 * * *"   # every 20 min daytime  (UTC ≈ 07:00–23:59 BST)
-    - cron: "0 23,0-5 * * *"    # hourly overnight       (UTC)
+  # SCHEDULE DISABLED until the repo secrets exist (EBAY_CLIENT_ID/SECRET,
+  # DATABASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID) — otherwise every timed
+  # run fails and emails the owner. Uncomment to go live once secrets are set.
+  # schedule:
+  #   - cron: "*/20 6-22 * * *"   # every 20 min daytime  (UTC ≈ 07:00–23:59 BST)
+  #   - cron: "0 23,0-5 * * *"    # hourly overnight       (UTC)
   workflow_dispatch:            # manual "Run workflow" button
 
 concurrency:
