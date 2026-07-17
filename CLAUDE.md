@@ -11,7 +11,7 @@ and flip, within a ~30-minute drive of **Liverpool**, and alerts new ones to
 
 Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
 
-## Current status (2026-07-17)
+## Current status (2026-07-18)
 
 - **LIVE.** All credentials exist (local `.env` + GitHub Actions secrets): eBay
   App ID + Cert ID, Neon `DATABASE_URL`, Telegram bot (@JB333_Ebay_bot, chat id
@@ -24,10 +24,12 @@ Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
   0 within 25km at launch (nearest was 30km); occasional alerts are expected,
   not a bug. Earlier vacuum + appliance searches preserved commented-out in
   `config/searches.yaml`, which now carries a how-to-edit cheat sheet.
-- **Actions schedule enabled** in `.github/workflows/scrape.yml` (every 20 min
-  daytime, hourly overnight).
-- **Not yet done:** README polish; live tuning pass on the vacuum & mixer
-  exclude_keywords lists.
+- **Actions schedule enabled** in `.github/workflows/scrape.yml`: every 2h,
+  06–22 UTC (≈07:00–23:00 BST), nothing overnight. First cloud run verified
+  green with the repo secrets. Offline unit tests (`tests/test_logic.py`,
+  8 passing) run on every push via `.github/workflows/test.yml`.
+- **Not yet done:** live tuning pass on the vacuum & mixer exclude_keywords
+  lists (watch alerts for part listings slipping through).
 
 ## How to run
 
@@ -38,7 +40,12 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 python -m src.main --dry-run     # search + filter + print; NO DB writes, NO Telegram
 python -m src.ebay --probe [i]   # validate eBay contract for search index i (default 0)
 python -m src.main               # full run: writes to DB, sends Telegram alerts
+python -m tests.test_logic       # offline unit tests (also run in CI on push)
 ```
+
+**On Jack's Windows machine** (the current dev box): Python is not on PATH — use
+`.venv\Scripts\python.exe`, and set `$env:PYTHONUTF8 = "1"` first or the console
+mangles £ and emoji.
 
 **Auth flexibility (important for testing):** `make_client()` in `src/main.py`
 prefers a static `EBAY_OAUTH_TOKEN` env var if set (a ~2-hour eBay *application
@@ -108,11 +115,11 @@ request code in `src/ebay.py`:
 ## Deployment (GitHub Actions)
 
 - Public repo `jrbahou-333/ebay_scraper` → unlimited free Actions minutes.
-- `.github/workflows/scrape.yml` runs the pipeline on a cron.
-- **Keep the `schedule:` trigger disabled (workflow_dispatch only) until the
-  secrets exist** — otherwise every scheduled run fails and emails Jack.
-- Required Actions **secrets:** `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`,
-  `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- `.github/workflows/scrape.yml` runs the pipeline on a cron (2-hourly daytime);
+  `.github/workflows/test.yml` runs the offline unit tests on every push.
+- All five Actions **secrets** are set and verified: `EBAY_CLIENT_ID`,
+  `EBAY_CLIENT_SECRET`, `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+  (same values as the local `.env`). If a secret is ever rotated, update both.
 - Note: GitHub auto-disables cron workflows after 60 days without repo activity.
 
 ## History / why eBay (not Facebook)
