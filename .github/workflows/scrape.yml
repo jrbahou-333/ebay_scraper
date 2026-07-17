@@ -2,8 +2,7 @@ name: scrape
 
 on:
   schedule:
-    - cron: "*/20 6-22 * * *"   # every 20 min daytime  (UTC ≈ 07:00–23:59 BST)
-    - cron: "0 23,0-5 * * *"    # hourly overnight       (UTC)
+    - cron: "0 6-22/2 * * *"    # every 2h daytime: 06,08,…,22 UTC (≈ 07:00–23:00 BST); nothing overnight
   workflow_dispatch:            # manual "Run workflow" button
 
 concurrency:
