@@ -79,11 +79,14 @@ def _format(row: dict) -> str:
     if row.get("search_query"):
         tags.append("search: " + html.escape(str(row["search_query"])))
 
+    # Title doubles as the link to the listing (falls back to plain text if the
+    # URL is ever missing). quote=True: eBay URLs contain & and land in an attr.
+    if row.get("url"):
+        title = f'<a href="{html.escape(row["url"], quote=True)}">{title}</a>'
+
     lines = [f"{icon} <b>{price} — {title}</b>" + (f" — {where_str}" if where_str else "")]
     if tags:
         lines.append(" · ".join(tags))
-    if row.get("url"):
-        lines.append(html.escape(row["url"]))
     return "\n".join(lines)
 
 

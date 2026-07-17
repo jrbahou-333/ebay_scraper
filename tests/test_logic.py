@@ -100,6 +100,8 @@ def test_notifier_format_escapes_and_flags():
     assert msg.startswith("🔧")
     assert "£30" in msg and "6.2 km" in msg
     assert "&lt;washer&gt; &amp; dryer" in msg     # HTML-escaped
+    assert '<a href="https://www.ebay.co.uk/itm/1">' in msg   # title links to listing
+    assert not msg.splitlines()[-1].startswith("https://")    # no bare URL line
 
     plain = notifier._format({**row, "highlights": [], "condition": "Used", "price_minor": 1250})
     assert plain.startswith("🏷") and "£12.50" in plain
