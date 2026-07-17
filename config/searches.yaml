@@ -18,23 +18,51 @@ condition_ids: [3000, 7000]
 # unseen this long are sold/ended).
 retention_days: 30
 
-# Searches are driven by eBay CATEGORY, not keywords: a bare keyword search is
-# ~90% spare parts, whereas the category holds whole units. A `query` refines
-# within the category (ANDed). max_price is GBP.
+# ============================== HOW TO EDIT ==================================
+# Each search is 4 lines. Copy this template, edit, save — next run picks it up:
 #
-# 20614 = "Vacuum Cleaners" (confirmed via eBay UK browse URLs). Vacuum *parts*
-# live in a separate category, so category-scoping keeps whole units — the same
-# win as the appliance searches. One live run is still wanted to tune the vacuum
-# exclude_keywords (below), as we did for appliances.
+#   - name: "My search"          # label shown in Telegram alerts
+#     category_ids: [20614]      # eBay category id(s) — see the list below
+#     query: "dyson"             # optional keywords WITHIN the category;
+#                                #   spaces = AND: "dyson animal"
+#                                #   (a, b)  = OR:  "(dyson v10, dyson v11)"
+#     max_price: 90              # GBP cap, applied by eBay server-side
+#
+# RULE: always set category_ids — a bare keyword search is ~90% spare parts.
+# The category holds whole units; the query refines within it.
+#
+# Confirmed EBAY_GB category ids:
+#   20614  Vacuum Cleaners            133701 Stand Mixers
+#   71256  Washing Machines           71257  Washer-Dryers
+#   71254  Tumble Dryers              116023 Dishwashers
+#   20713  Fridge Freezers            71262  Fridges       71260 Freezers
+#   71250  Cookers                    258592 Gas Ranges    71318 Ovens
+#
+# To find a new category id: ask Claude to probe it, or search the item on
+# ebay.co.uk, open a listing, and read the category from the breadcrumb link
+# (the number after "/b/" or "_sacat=" in the URL).
+# =============================================================================
+
 searches:
-  - name: "Dyson vacuums"
+  - name: "Dyson V10+"
     category_ids: [20614]               # Vacuum Cleaners
-    query: "dyson"
-    max_price: 90                       # faulty/cheap cordless flip range; working ones sell £120+
-  - name: "Hoover & other vacuums"
-    category_ids: [20614]               # Vacuum Cleaners
-    query: "hoover"
-    max_price: 45
+    query: "(dyson v10, dyson v11, dyson v12, dyson v15, dyson gen5)"
+    max_price: 120                      # working V10 resells ~£120-180, V11/V15 more;
+                                        # cap catches faulty + underpriced units
+  - name: "KitchenAid stand mixers"
+    category_ids: [133701]              # Stand Mixers (confirmed by live probe)
+    query: "kitchenaid"
+    max_price: 150                      # working Artisan resells £200-350
+
+# --- Previous vacuum searches (preserved; uncomment to re-enable) ---
+#  - name: "Dyson vacuums"
+#    category_ids: [20614]               # Vacuum Cleaners
+#    query: "dyson"
+#    max_price: 90                       # faulty/cheap cordless flip range; working ones sell £120+
+#  - name: "Hoover & other vacuums"
+#    category_ids: [20614]               # Vacuum Cleaners
+#    query: "hoover"
+#    max_price: 45
 
 # --- Previous appliance searches (preserved; uncomment to re-enable) ---
 #  - name: "Washing machines"
@@ -119,6 +147,20 @@ filters:
     #    accessories). Needs a live tuning pass like the appliance list got. --
     - brush bar
     - brushbar
+    # -- stand-mixer accessories that share the Stand Mixers category. NB: do NOT
+    #    exclude bare "bowl"/"attachment" ("with bowl & attachments" = whole unit
+    #    sold complete) — only "-only"/part phrasings. --
+    - bowl only
+    - dough hook
+    - flat beater
+    - wire whip
+    - whisk only
+    - pouring shield
+    - splash guard
+    - flex edge
+    - stand only
+    - attachment only
+    - attachments only
     - soleplate
     - hepa filter
     - post-motor filter

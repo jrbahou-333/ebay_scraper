@@ -11,22 +11,23 @@ and flip, within a ~30-minute drive of **Liverpool**, and alerts new ones to
 
 Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
 
-## Current status (2026-07-15)
+## Current status (2026-07-17)
 
-- **Working & validated live:** the whole pipeline via `--dry-run` — eBay auth,
-  search, locality, category filtering, keyword filters, dedupe. DB layer
-  (`src/db.py`) validated end-to-end against the real Neon instance.
-- **Config currently targets vacuums:** "Dyson vacuums" + "Hoover & other
-  vacuums" (eBay category 20614). The original 7 appliance searches are preserved
-  **commented-out** in `config/searches.yaml` — uncomment to re-enable.
-- **Blocked on credentials** to do a real (non-dry) run:
-  1. **eBay** — need the **Cert ID** (OAuth client secret; was gated behind eBay
-     account verification). The **App ID** is already in `.env`. A short-lived
-     `EBAY_OAUTH_TOKEN` also works for testing (see below).
-  2. **Telegram** — need a **bot token** from @BotFather (chat_id can be derived
-     from the token once the bot has been messaged).
-- **Not yet done:** real baseline run, idempotency check, enabling the Actions
-  schedule, README polish.
+- **LIVE.** All credentials exist (local `.env` + GitHub Actions secrets): eBay
+  App ID + Cert ID, Neon `DATABASE_URL`, Telegram bot (@JB333_Ebay_bot, chat id
+  in `.env`). Real runs validated end-to-end: baseline stored (quiet first run),
+  idempotency confirmed (second run re-alerted nothing, alerted 1 genuinely new
+  listing), Telegram delivery confirmed with photos.
+- **Config targets:** "Dyson V10+" (category 20614, OR-query for v10/v11/v12/
+  v15/gen5, ≤£120) and "KitchenAid stand mixers" (category **133701** Stand
+  Mixers, confirmed by live probe, ≤£150). KitchenAid is a thin local market —
+  0 within 25km at launch (nearest was 30km); occasional alerts are expected,
+  not a bug. Earlier vacuum + appliance searches preserved commented-out in
+  `config/searches.yaml`, which now carries a how-to-edit cheat sheet.
+- **Actions schedule enabled** in `.github/workflows/scrape.yml` (every 20 min
+  daytime, hourly overnight).
+- **Not yet done:** README polish; live tuning pass on the vacuum & mixer
+  exclude_keywords lists.
 
 ## How to run
 
