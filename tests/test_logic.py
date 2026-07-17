@@ -16,13 +16,11 @@ def _mk(item_id, title, price=3000, dist=5.0, cond="Used"):
 
 
 def test_filter_string():
+    # No pickup* params: eBay silently ignores them (see src/ebay.py docstring);
+    # locality is the ENDUSERCTX header + client-side radius check instead.
     assert _build_filter(
-        max_price=50, condition_ids=[3000, 7000],
-        postcode="L1", country="GB", radius_km=25,
-    ) == (
-        "conditionIds:{3000|7000},price:[..50],priceCurrency:GBP,"
-        "pickupCountry:GB,pickupPostalCode:L1,pickupRadius:25,pickupRadiusUnit:km"
-    )
+        max_price=50, condition_ids=[3000, 7000], country="GB",
+    ) == "conditionIds:{3000|7000},price:[..50],priceCurrency:GBP,itemLocationCountry:GB"
 
 
 def test_to_pence():
@@ -32,9 +30,9 @@ def test_to_pence():
     assert _to_pence({"value": None}) is None
 
 
-def test_location_prefers_city_then_postcode():
-    assert _location_str({"city": "Bootle", "postalCode": "L20"}) == "Bootle"
-    assert _location_str({"postalCode": "L20 ***", "country": "GB"}) == "L20 ***"
+def test_location_prefers_postcode_then_city():
+    assert _location_str({"city": "Bootle", "postalCode": "L20"}) == "L20"
+    assert _location_str({"city": "Bootle"}) == "Bootle"
     assert _location_str({"country": "GB"}) == "GB"
     assert _location_str(None) is None
 

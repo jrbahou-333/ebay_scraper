@@ -1,9 +1,14 @@
-# eBay appliance sniper — Liverpool
+# eBay local-pickup sniper — Liverpool
 
-Watches eBay UK for cheap / faulty appliances (washing machines, dryers,
-dishwashers, fridge-freezers, ovens) available for **local collection** within a
-~30-minute drive of Liverpool, and pings new listings to **Telegram** the moment
-they appear. Runs free on **GitHub Actions**.
+Watches eBay UK for cheap / faulty items worth repairing and flipping, available
+for **local collection** within a ~30-minute drive of Liverpool, and pings new
+listings to **Telegram** the moment they appear. Runs free on **GitHub Actions**,
+every 2 hours during the day.
+
+**Currently hunting:** Dyson V10-and-up cordless vacuums (≤£120) and KitchenAid
+stand mixers (≤£150). Earlier white-goods searches (washing machines, dryers,
+dishwashers, fridge-freezers, ovens) are preserved commented-out in the config —
+everything it hunts is defined in [`config/searches.yaml`](config/searches.yaml).
 
 It uses eBay's official **Browse API** (OAuth) — not scraping — so it runs reliably
 from GitHub's cloud runners. (An earlier Facebook Marketplace prototype is archived
@@ -56,29 +61,46 @@ You need four free accounts/credentials. Put them in GitHub **repository secrets
    `"chat":{"id":...}` → that number → `TELEGRAM_CHAT_ID`.
 
 ### 4. GitHub
-The scraper is already scheduled in [`.github/workflows/scrape.yml`](.github/workflows/scrape.yml).
-Add the five secrets above, then use the **Actions** tab → *scrape* → **Run workflow**
-to trigger the first run manually.
+The scraper runs on the cron in [`.github/workflows/scrape.yml`](.github/workflows/scrape.yml)
+(every 2 hours, 06:00–22:00 UTC; nothing overnight). Add the five secrets above,
+then use the **Actions** tab → *scrape* → **Run workflow** to trigger a run
+manually at any time. Offline unit tests run on every push (*test* workflow).
 
 > GitHub disables scheduled workflows after **60 days without a repo commit** — push
 > any change occasionally to keep it alive.
 
 ## Running locally
 
+Linux / macOS:
+
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env         # then fill in your credentials
 
-python -m src.ebay --probe   # Milestone 0: verify eBay creds + one live search
+python -m src.ebay --probe    # verify eBay creds + one live search
 python -m src.main --dry-run  # search + print only, no DB writes, no Telegram
 python -m src.main            # full run
+python -m tests.test_logic    # offline unit tests
+```
+
+Windows (PowerShell) — the `PYTHONUTF8` line stops the console mangling £ and emoji:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+copy .env.example .env       # then fill in your credentials
+
+$env:PYTHONUTF8 = "1"
+.venv\Scripts\python -m src.main --dry-run
 ```
 
 ## Configuration
 
 Everything tunable lives in [`config/searches.yaml`](config/searches.yaml): the
-search terms and per-term price caps, the centre `postcode` and `radius_km`, the
-eBay `condition_ids` (3000 = Used, 7000 = For parts or not working),
-`retention_days`, and the exclude / highlight keyword lists. Edit and commit —
-changes take effect on the next run.
+searches (category + optional query + price cap), the centre `postcode` and
+`radius_km`, the eBay `condition_ids` (3000 = Used, 7000 = For parts or not
+working), `retention_days`, and the exclude / highlight keyword lists. The file
+opens with a **how-to-edit cheat sheet** — a copy-paste search template, the
+query syntax, and the confirmed eBay GB category ids. Edit and commit — changes
+take effect on the next run (and the push resets GitHub's 60-day cron timer).
