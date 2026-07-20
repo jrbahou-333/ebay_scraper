@@ -3,7 +3,7 @@
 Watches eBay UK for cheap / faulty items worth repairing and flipping, available
 for **local collection** within a ~30-minute drive of Liverpool, and pings new
 listings to **Telegram** the moment they appear. Runs free on **GitHub Actions**,
-every 2 hours during the day.
+every 4 hours during the day.
 
 **Currently hunting:** Dyson V10-and-up cordless vacuums (≤£120) and KitchenAid
 stand mixers (≤£150). Earlier white-goods searches (washing machines, dryers,
@@ -62,7 +62,7 @@ You need four free accounts/credentials. Put them in GitHub **repository secrets
 
 ### 4. GitHub
 The scraper runs on the cron in [`.github/workflows/scrape.yml`](.github/workflows/scrape.yml)
-(every 2 hours, 06:00–22:00 UTC; nothing overnight). Add the five secrets above,
+(every 4 hours, 06:00–22:00 UTC; nothing overnight). Add the five secrets above,
 then use the **Actions** tab → *scrape* → **Run workflow** to trigger a run
 manually at any time. Offline unit tests run on every push (*test* workflow).
 

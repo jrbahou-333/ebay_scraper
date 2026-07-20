@@ -24,7 +24,7 @@ Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
   0 within 25km at launch (nearest was 30km); occasional alerts are expected,
   not a bug. Earlier vacuum + appliance searches preserved commented-out in
   `config/searches.yaml`, which now carries a how-to-edit cheat sheet.
-- **Actions schedule enabled** in `.github/workflows/scrape.yml`: every 2h,
+- **Actions schedule enabled** in `.github/workflows/scrape.yml`: every 4h,
   06–22 UTC (≈07:00–23:00 BST), nothing overnight. First cloud run verified
   green with the repo secrets. Offline unit tests (`tests/test_logic.py`,
   8 passing) run on every push via `.github/workflows/test.yml`.
