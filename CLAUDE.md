@@ -11,25 +11,33 @@ and flip, within a ~30-minute drive of **Liverpool**, and alerts new ones to
 
 Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
 
-## Current status (2026-07-18)
+## Current status (2026-07-25)
 
 - **LIVE.** All credentials exist (local `.env` + GitHub Actions secrets): eBay
   App ID + Cert ID, Neon `DATABASE_URL`, Telegram bot (@JB333_Ebay_bot, chat id
   in `.env`). Real runs validated end-to-end: baseline stored (quiet first run),
-  idempotency confirmed (second run re-alerted nothing, alerted 1 genuinely new
-  listing), Telegram delivery confirmed with photos.
+  idempotency confirmed, Telegram delivery confirmed with photos and (now)
+  hyperlinked titles.
 - **Config targets:** "Dyson V10+" (category 20614, OR-query for v10/v11/v12/
-  v15/gen5, ≤£120) and "KitchenAid stand mixers" (category **133701** Stand
-  Mixers, confirmed by live probe, ≤£150). KitchenAid is a thin local market —
-  0 within 25km at launch (nearest was 30km); occasional alerts are expected,
-  not a bug. Earlier vacuum + appliance searches preserved commented-out in
+  v13/v14/v15/gen5, ≤£120) and "KitchenAid stand mixers" (category **133701**
+  Stand Mixers, confirmed by live probe, ≤£200). `radius_km` widened 25→40 on
+  2026-07-25 after a week of near-zero matches at 25km (~7 static Dyson
+  listings, 0 KitchenAid) — 40km found 21 unique whole units incl. 4
+  KitchenAid. Earlier vacuum + appliance searches preserved commented-out in
   `config/searches.yaml`, which now carries a how-to-edit cheat sheet.
+- **exclude_keywords tuned against live data** (2026-07-25): a parts reseller
+  was flooding the 30-40km band with individual components once the radius
+  widened. Added `" part"` (leading space — catches "replacement part"/"motor
+  part" without matching "apart"/"compartment"), `body only`, `motor body`,
+  `bin slider`, `handle housing`. Cut 45 raw Dyson matches down to 17 genuine
+  whole-unit listings (28 dropped). Re-check if alerts start showing spares.
 - **Actions schedule enabled** in `.github/workflows/scrape.yml`: every 4h,
-  06–22 UTC (≈07:00–23:00 BST), nothing overnight. First cloud run verified
-  green with the repo secrets. Offline unit tests (`tests/test_logic.py`,
-  8 passing) run on every push via `.github/workflows/test.yml`.
-- **Not yet done:** live tuning pass on the vacuum & mixer exclude_keywords
-  lists (watch alerts for part listings slipping through).
+  06–22 UTC (≈07:00–23:00 BST), nothing overnight. 50+ cloud runs green.
+  Offline unit tests (`tests/test_logic.py`, 8 passing) run on every push via
+  `.github/workflows/test.yml`.
+- **Not yet done:** further exclude-keyword tuning if new part-listing patterns
+  show up now the net is wider; KitchenAid still thin (occasional alerts
+  expected, not a bug).
 
 ## How to run
 

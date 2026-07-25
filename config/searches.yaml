@@ -4,7 +4,7 @@ location:
   postcode: "L1 8JQ"    # centre of the collection radius (Liverpool city centre);
                         # also sent to eBay as the buyer location so distances populate
   country: GB
-  radius_km: 25         # ~30 min drive; enforced client-side (eBay ignores its own radius filter)
+  radius_km: 40         # ~45 min drive; enforced client-side (eBay ignores its own radius filter)
 
 marketplace: EBAY_GB
 
@@ -46,13 +46,14 @@ retention_days: 30
 searches:
   - name: "Dyson V10+"
     category_ids: [20614]               # Vacuum Cleaners
-    query: "(dyson v10, dyson v11, dyson v12, dyson v15, dyson gen5)"
+    query: "(dyson v10, dyson v11, dyson v12, dyson v13, dyson v14, dyson v15, dyson gen5)"
     max_price: 120                      # working V10 resells ~£120-180, V11/V15 more;
                                         # cap catches faulty + underpriced units
   - name: "KitchenAid stand mixers"
     category_ids: [133701]              # Stand Mixers (confirmed by live probe)
     query: "kitchenaid"
-    max_price: 150                      # working Artisan resells £200-350
+    max_price: 200                      # working Artisan resells £200-350; was 150,
+                                        # raised to catch more of the thin local market
 
 # --- Previous vacuum searches (preserved; uncomment to re-enable) ---
 #  - name: "Dyson vacuums"
@@ -147,6 +148,12 @@ filters:
     #    accessories). Needs a live tuning pass like the appliance list got. --
     - brush bar
     - brushbar
+    - motor body
+    - bin slider
+    - handle housing
+    - " part"          # leading space: catches "replacement part"/"motor part"/
+                        # "...roller part" etc without matching "apart"/"compartment"
+    - body only
     # -- stand-mixer accessories that share the Stand Mixers category. NB: do NOT
     #    exclude bare "bowl"/"attachment" ("with bowl & attachments" = whole unit
     #    sold complete) — only "-only"/part phrasings. --
