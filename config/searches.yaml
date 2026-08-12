@@ -37,6 +37,13 @@ retention_days: 30
 #   71254  Tumble Dryers              116023 Dishwashers
 #   20713  Fridge Freezers            71262  Fridges       71260 Freezers
 #   71250  Cookers                    258592 Gas Ranges    71318 Ovens
+#   38252  Espresso & Cappuccino Machines     65643  Bean-to-Cup Coffee Machines
+#   32882  Coffee Grinders                    156775 Pod & Capsule Coffee Machines
+#   159902 Other Coffee, Tea & Espresso Makers
+#
+# Use LEAF categories only. The coffee parent 38250 ("Coffee, Tea & Espresso
+# Makers") contains child 99565 ("Coffee, Tea, Espresso Parts"), so searching the
+# parent drags the whole spares aisle in with it.
 #
 # To find a new category id: ask Claude to probe it, or search the item on
 # ebay.co.uk, open a listing, and read the category from the breadcrumb link
@@ -54,6 +61,19 @@ searches:
     query: "kitchenaid"
     max_price: 200                      # working Artisan resells £200-350; was 150,
                                         # raised to catch more of the thin local market
+  - name: "Sage coffee machines"
+    category_ids: [38252, 65643, 156775, 159902]
+                                        # Espresso & Cappuccino, Bean-to-Cup,
+                                        # Pod & Capsule (Sage-branded Nespresso
+                                        # Creatista lives here), Other
+    query: "sage"                       # also catches "Breville Sage" imports, since
+                                        # Breville is Sage's name outside the UK
+    max_price: 150                      # Bambino Plus resells £150-250, Barista
+                                        # Express £250-400, Creatista £150-250
+  - name: "Sage coffee grinders"
+    category_ids: [32882]               # Coffee Grinders
+    query: "sage"
+    max_price: 150                      # Smart Grinder Pro resells £130-180
 
 # --- Previous vacuum searches (preserved; uncomment to re-enable) ---
 #  - name: "Dyson vacuums"
@@ -175,6 +195,38 @@ filters:
     - cyclone assembly
     - wand handle
     - docking station
+    # -- coffee-machine / grinder parts sharing the whole-machine categories. The
+    #    Bean-to-Cup category (65643) is dominated by one parts reseller ~35km out:
+    #    a live probe returned 22 listings there, ALL of them components. NB: do NOT
+    #    exclude "milk frother" or "milk jug" (whole units advertise "with milk
+    #    frother" / "no milk jug"), "steam wand" ("machine with steam wand"), or
+    #    "burr" (grinder model names are "conical burr grinder"). --
+    - replacement top
+    - top cover
+    - brew head
+    - shower group
+    - shower screen
+    - thermocoil
+    - thermoblock
+    - triac
+    - drip tray
+    - power cable
+    - water tank
+    - portafilter
+    - tamper
+    - cleaning disc
+    - descaler
+    - descaling
+    - bean hopper
+    - hopper bean
+    - grinder assembly
+    - grinder switch
+    - display panel
+    - wand cleaner
+    - grill plate
+    - basket only
+    - burr set
+    - burrs only
     # -- novelty / non-white-goods that live in the fridge categories --
     - mini fridge
     - mini-fridge

@@ -11,7 +11,7 @@ and flip, within a ~30-minute drive of **Liverpool**, and alerts new ones to
 
 Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
 
-## Current status (2026-07-25)
+## Current status (2026-08-12)
 
 - **LIVE.** All credentials exist (local `.env` + GitHub Actions secrets): eBay
   App ID + Cert ID, Neon `DATABASE_URL`, Telegram bot (@JB333_Ebay_bot, chat id
@@ -31,13 +31,31 @@ Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
   part" without matching "apart"/"compartment"), `body only`, `motor body`,
   `bin slider`, `handle housing`. Cut 45 raw Dyson matches down to 17 genuine
   whole-unit listings (28 dropped). Re-check if alerts start showing spares.
+- **Sage coffee machines + grinders added** (2026-08-12), ≤£150 each, driven by
+  Jack wanting the Bambino Plus and any other Sage kit. Two searches: "Sage
+  coffee machines" (categories **38252** Espresso & Cappuccino, **65643**
+  Bean-to-Cup, **156775** Pod & Capsule, **159902** Other) and "Sage coffee
+  grinders" (**32882**) — all five ids confirmed by live probe, all leaves (the
+  parent 38250 would drag in child 99565 "Coffee, Tea, Espresso Parts"). Live
+  probe at 40km: 32 raw → 23 dropped → **9 genuine whole units** (Duo-Temp Pro
+  £119 and £104 faulty, Smart Grinder Pro £90, 6× Nespresso Creatista £53–£132).
+  Bean-to-Cup was 22/22 spare parts from one reseller ~35km out, so ~30 coffee
+  part keywords were added and verified to drop all 23 with **zero** false drops
+  (`top cover`, `brew head`, `thermocoil`, `triac`, `drip tray`, `shower
+  screen`, `portafilter`, `hopper bean`, `grinder assembly`, …). Deliberately
+  NOT excluded: `milk frother`/`milk jug` (whole units say "with milk frother" /
+  "no milk jug"), `steam wand`, `burr` (model names read "conical burr grinder").
 - **Actions schedule enabled** in `.github/workflows/scrape.yml`: every 4h,
   06–22 UTC (≈07:00–23:00 BST), nothing overnight. 50+ cloud runs green.
   Offline unit tests (`tests/test_logic.py`, 8 passing) run on every push via
   `.github/workflows/test.yml`.
 - **Not yet done:** further exclude-keyword tuning if new part-listing patterns
   show up now the net is wider; KitchenAid still thin (occasional alerts
-  expected, not a bug).
+  expected, not a bug). The Sage searches are validated by a full local
+  `--dry-run` (82 found / 53 dropped / 29 unique across all four searches) but
+  have not yet had a real DB+Telegram run — the first one will alert the ~9
+  existing coffee listings in a single burst. Expected, not a bug: the baseline
+  guard only suppresses alerts when the whole DB is empty, and it isn't.
 
 ## How to run
 
@@ -54,6 +72,21 @@ python -m tests.test_logic       # offline unit tests (also run in CI on push)
 **On Jack's Windows machine** (the current dev box): Python is not on PATH — use
 `.venv\Scripts\python.exe`, and set `$env:PYTHONUTF8 = "1"` first or the console
 mangles £ and emoji.
+
+**If `.venv\Scripts\python.exe` dies with `No Python at '...Python312\python.exe'`:**
+the venv's base interpreter has gone missing (this happened on 2026-08-12 — only
+the Microsoft Store `python.exe` stub was left on PATH). `site-packages` survives
+this, so the fix is just to reinstall the same minor version and the existing venv
+works again untouched:
+
+```powershell
+winget install --id Python.Python.3.12 --scope user --accept-package-agreements
+```
+
+`--scope user` matters: it restores the exact `%LOCALAPPDATA%\Programs\Python\Python312`
+path `pyvenv.cfg` points at. A different minor version needs `py -m venv --clear
+.venv` + a `pip install -r requirements.txt` instead. Note CI is never affected —
+Actions installs its own Python.
 
 **Auth flexibility (important for testing):** `make_client()` in `src/main.py`
 prefers a static `EBAY_OAUTH_TOKEN` env var if set (a ~2-hour eBay *application
