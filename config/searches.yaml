@@ -4,15 +4,14 @@ location:
   postcode: "L1 8JQ"    # centre of the collection radius (Liverpool city centre);
                         # also sent to eBay as the buyer location so distances populate
   country: GB
-  radius_km: 40         # ~45 min drive; enforced client-side (eBay ignores its own radius filter)
+  radius_km: 60        
 
 marketplace: EBAY_GB
 
 # eBay item condition IDs to include:
-#   3000 = Used
-#   7000 = For parts or not working
-# (1000 New / 1500 New other / 2500 Seller refurbished are deliberately excluded)
-condition_ids: [3000, 7000]
+#   3000 = Used | 7000 = For parts or not working | 1000 New / 
+#   1500 New other / 2500 Seller refurbished)
+condition_ids: [3000, 2500, 7000]
 
 # Delete listings not seen in this many days (keeps the DB flat; eBay items
 # unseen this long are sold/ended).
@@ -51,63 +50,38 @@ retention_days: 30
 # =============================================================================
 
 searches:
-  - name: "Dyson V10+"
-    category_ids: [20614]               # Vacuum Cleaners
-    query: "(dyson v10, dyson v11, dyson v12, dyson v13, dyson v14, dyson v15, dyson gen5)"
-    max_price: 120                      # working V10 resells ~£120-180, V11/V15 more;
-                                        # cap catches faulty + underpriced units
-  - name: "KitchenAid stand mixers"
-    category_ids: [133701]              # Stand Mixers (confirmed by live probe)
-    query: "kitchenaid"
-    max_price: 200                      # working Artisan resells £200-350; was 150,
-                                        # raised to catch more of the thin local market
-  - name: "Sage coffee machines"
-    category_ids: [38252, 65643, 156775, 159902]
-                                        # Espresso & Cappuccino, Bean-to-Cup,
-                                        # Pod & Capsule (Sage-branded Nespresso
-                                        # Creatista lives here), Other
-    query: "sage"                       # also catches "Breville Sage" imports, since
-                                        # Breville is Sage's name outside the UK
-    max_price: 150                      # Bambino Plus resells £150-250, Barista
-                                        # Express £250-400, Creatista £150-250
+  - name: "Sage coffee machines (pro and above)"
+    category_ids: [38252, 156775, 159902]
+    query: "sage barista"                       
+    max_price: 150          
+
+  - name: "sage Bambino"
+    category_ids: [38252, 156775, 159902]
+    query: sage bambino
+    max_price: 100
+
+  - name: "Ninja coffee machine"
+    category_ids: [38252, 156775, 159902]
+    query: Ninja coffee machine
+    max_price: 100
+
   - name: "Sage coffee grinders"
     category_ids: [32882]               # Coffee Grinders
     query: "sage"
-    max_price: 150                      # Smart Grinder Pro resells £130-180
+    max_price: 50                      # Smart Grinder Pro resells £130-180
 
-# --- Previous vacuum searches (preserved; uncomment to re-enable) ---
-#  - name: "Dyson vacuums"
-#    category_ids: [20614]               # Vacuum Cleaners
-#    query: "dyson"
-#    max_price: 90                       # faulty/cheap cordless flip range; working ones sell £120+
-#  - name: "Hoover & other vacuums"
-#    category_ids: [20614]               # Vacuum Cleaners
-#    query: "hoover"
-#    max_price: 45
 
 # --- Previous appliance searches (preserved; uncomment to re-enable) ---
-#  - name: "Washing machines"
-#    category_ids: [71256, 71257]        # Washing Machines, Washer-Dryers
-#    max_price: 60
-#  - name: "Tumble dryers"
-#    category_ids: [71254]               # Tumble Dryers
-#    max_price: 45
-#  - name: "Dishwashers"
-#    category_ids: [116023]              # Dishwashers
-#    max_price: 45
-#  - name: "Fridge freezers"
-#    category_ids: [20713, 71262, 71260] # Fridge Freezers, Fridges, Freezers
-#    max_price: 70
-#  - name: "American fridge freezers"
-#    category_ids: [20713]
-#    query: "american"
-#    max_price: 120
-#  - name: "Cookers & ranges"
-#    category_ids: [71250, 258592]       # Cookers, Gas Ranges
-#    max_price: 110
-#  - name: "Ovens (built-in)"
-#    category_ids: [71318]               # Ovens
-#    max_price: 60
+  # - name: "Dyson V10+"
+  #   category_ids: [20614]               # Vacuum Cleaners
+  #   query: "(dyson v10, dyson v11, dyson v12, dyson v13, dyson v14, dyson v15, dyson gen5)"
+  #   max_price: 120                      # working V10 resells ~£120-180, V11/V15 more;
+  #                                       # cap catches faulty + underpriced units
+  # - name: "KitchenAid stand mixers"
+  #   category_ids: [133701]              # Stand Mixers (confirmed by live probe)
+  #   query: "kitchenaid"
+  #   max_price: 200                      # working Artisan resells £200-350; was 150,
+  #                                       # raised to catch more of the thin local market
 
 filters:
   # Backstop for the parts that share a category with whole units (an oven's
