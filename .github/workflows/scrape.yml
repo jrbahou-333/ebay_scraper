@@ -1,9 +1,10 @@
 name: scrape
 
+# Triggered externally by cron-job.org via the workflow_dispatch API (every 4h,
+# 07:00-23:00 UK time) — GitHub's own `schedule:` ran 1-4h late. Also runnable
+# by hand from the Actions tab.
 on:
-  schedule:
-    - cron: "0 6-22/4 * * *"    # every 4h daytime: 06,10,14,18,22 UTC (≈ 07:00–23:00 BST); nothing overnight
-  workflow_dispatch:            # manual "Run workflow" button
+  workflow_dispatch:
 
 concurrency:
   group: scrape

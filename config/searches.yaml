@@ -12,8 +12,9 @@ location:
 marketplace: EBAY_GB
 
 # Auctions are never alerted when first found — only once, when they end within
-# this many minutes (checked every 15 min by .github/workflows/auctions.yml).
-auction_alert_minutes: 60
+# this many minutes. The auction check runs hourly (cron-job.org), so with 120
+# the alert lands 60-120 min before the end. Keep this > the check interval.
+auction_alert_minutes: 120
 
 # eBay item condition IDs to include:
 #   3000 = Used | 7000 = For parts or not working | 1000 New / 

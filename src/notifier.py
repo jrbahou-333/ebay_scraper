@@ -66,7 +66,7 @@ class Notifier:
         return self._send(_format(row, self._pickup_km), row.get("image_url"))
 
     def send_ending(self, row: dict, minutes_left: int) -> bool:
-        """Alert an auction in its last hour; `row['price_minor']` is the live bid."""
+        """Alert an auction close to finishing; `row['price_minor']` is the best-known bid."""
         return self._send(_format_ending(row, minutes_left, self._pickup_km), row.get("image_url"))
 
 
@@ -85,8 +85,14 @@ def _format(row: dict, pickup_km=None) -> str:
     return "\n".join(lines)
 
 
+def _time_left(minutes: int) -> str:
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
 def _format_ending(row: dict, minutes_left: int, pickup_km=None) -> str:
-    return f"⏰ Auction ends in {minutes_left} min\n" + _format(row, pickup_km)
+    return f"⏰ Auction ends in {_time_left(minutes_left)}\n" + _format(row, pickup_km)
 
 
 def _price_str(price_minor, currency: str) -> str:

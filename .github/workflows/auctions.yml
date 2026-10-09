@@ -1,14 +1,14 @@
 name: auctions
 
-# Last-hour auction alerts. The scrape workflow stores auctions; this checks the DB
-# every 15 min for ones ending within auction_alert_minutes (config/searches.yaml)
-# and sends one Telegram alert each. Cheap: a DB query + one eBay call per auction.
-# GitHub can start scheduled runs 5-20 min late, which is why the lead is an hour.
-
+# Auction alerts: finds stored auctions ending within auction_alert_minutes
+# (config/searches.yaml) and sends one Telegram alert each. Cheap: a DB query + one
+# eBay call per auction.
+#
+# Triggered externally by cron-job.org via the workflow_dispatch API, hourly —
+# GitHub's own `schedule:` ran 1-4h late, which would miss auction endings. Also
+# runnable by hand from the Actions tab.
 on:
-  schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch:            # manual "Run workflow" button
+  workflow_dispatch:
 
 concurrency:
   group: auctions

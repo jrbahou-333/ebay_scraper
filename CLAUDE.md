@@ -25,10 +25,13 @@ Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
     ~£300–370). Caps are asking prices: see the buyer-fee gotcha below.
 - **Alerts are minimal by request:** price + linked title + "Close by". No km,
   condition or search label. Jack opens the listing for the rest.
-- **Buy It Now is alerted on discovery. Auctions never are**: `src/auctions.py`
-  (every 15 min, `.github/workflows/auctions.yml`) sends one "⏰ Auction ends in
-  N min" alert when a stored auction ends within `auction_alert_minutes` (60).
-  It re-reads the live bid first and skips if the bid is now over the cap.
+- **Buy It Now is alerted on discovery. Auctions never are**, by Jack's
+  explicit choice: no "new auction" message. `src/auctions.py` runs hourly via
+  cron-job.org and sends one "⏰ Auction ends in 1h 34m" alert when a stored
+  auction ends within `auction_alert_minutes` (120), so it lands 60–120 min
+  before the end. Timing comes from the `end_date` stored at scrape time. The
+  eBay call only adds the live bid and skips auctions that ended or went over
+  budget. If eBay errors, the alert still goes out with the stored price.
 - **Distance unit bug fixed (2026-10-09):** eBay reports MILES. Every earlier
   "km" figure in this file (25→40→60 km radius) was really miles.
 - Live dry-run at this point: 61 found → 43 dropped → 18 kept (4 auctions).
@@ -95,7 +98,7 @@ python -m src.ebay --probe [i]   # validate eBay contract for search index i (de
 python -m src.main               # full run: writes to DB, sends Telegram alerts
 python -m src.auctions --dry-run # list auctions ending within the hour; no sends/marks
                                  #   (does apply idempotent schema migrations)
-python -m src.auctions           # send last-hour auction alerts
+python -m src.auctions           # send ending-soon auction alerts
 python -m tests.test_logic       # offline unit tests (also run in CI on push)
 ```
 
@@ -190,7 +193,9 @@ request code in `src/ebay.py`:
   `condition_ids`, uses `filters.fault_keywords`), and
   `premium`: a list of `{max_price, keywords}` tiers. The highest matching tier
   wins, and a single dict also works.
-- `auction_alert_minutes`: the lead time for the single auction alert.
+- `auction_alert_minutes`: the window for the single auction alert. It must be
+  longer than the auction check interval: 120 with hourly checks means alerts
+  land 60–120 min before the end.
 - `condition_ids: [3000, 7000]` = Used + For parts or not working.
 - Each search: `name`, `category_ids` (list, queried one-by-one), optional
   `query`, `max_price` (GBP, server-side cap).
@@ -204,14 +209,26 @@ request code in `src/ebay.py`:
 ## Deployment (GitHub Actions)
 
 - Public repo `jrbahou-333/ebay_scraper` → unlimited free Actions minutes.
-- `.github/workflows/scrape.yml` runs the pipeline on a cron (4-hourly daytime).
-  `.github/workflows/auctions.yml` runs `src.auctions` every 15 min, around the
-  clock. GitHub often starts scheduled runs 5–20 min late, hence the 60-min lead.
-  `.github/workflows/test.yml` runs the offline unit tests on every push.
+- **Both run workflows are triggered externally by cron-job.org** (since
+  2026-10-09). They have no `schedule:`, only `workflow_dispatch`. GitHub's own
+  scheduler was starting runs 1–4 hours late (the 22:00 scrape ran at 01:55),
+  which is fatal for auction timing. Dispatch-API runs start within seconds.
+  - `scrape.yml`: every 4h, 07:00–23:00 UK time.
+  - `auctions.yml`: hourly, around the clock.
+  - Each cron-job.org job does `POST https://api.github.com/repos/jrbahou-333/
+    ebay_scraper/actions/workflows/<file>.yml/dispatches` with body
+    `{"ref":"main"}` and headers `Authorization: Bearer <PAT>`,
+    `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`.
+    GitHub answers 204.
+  - The PAT is a fine-grained token limited to this repo, with **Actions:
+    Read and write** only. It lives only in cron-job.org. **If it expires, both
+    jobs stop silently.** Its expiry date is set in GitHub, and cron-job.org's
+    failure email is the alarm.
+  - The 60-day inactivity auto-disable doesn't apply to dispatch-triggered runs.
+- `.github/workflows/test.yml` runs the offline unit tests on every push.
 - All five Actions **secrets** are set and verified: `EBAY_CLIENT_ID`,
   `EBAY_CLIENT_SECRET`, `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
   (same values as the local `.env`). If a secret is ever rotated, update both.
-- Note: GitHub auto-disables cron workflows after 60 days without repo activity.
 
 ## History / why eBay (not Facebook)
 

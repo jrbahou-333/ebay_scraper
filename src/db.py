@@ -123,8 +123,8 @@ def _dicts(cur) -> list[dict]:
 def fetch_unnotified(conn) -> list[dict]:
     """Buy It Now rows still awaiting a Telegram alert (notified_at IS NULL).
 
-    Auctions are excluded: they're alerted once, in their last hour, by
-    fetch_ending_auctions / src/auctions.py.
+    Auctions are excluded: they're alerted once, only when close to finishing,
+    by fetch_ending_auctions / src/auctions.py.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -139,7 +139,7 @@ def fetch_unnotified(conn) -> list[dict]:
 
 
 def fetch_ending_auctions(conn, within_min: int) -> list[dict]:
-    """Auctions ending in the next `within_min` minutes with no last-hour alert yet."""
+    """Auctions ending in the next `within_min` minutes with no ending alert yet."""
     with conn.cursor() as cur:
         cur.execute(
             f"""
@@ -155,7 +155,7 @@ def fetch_ending_auctions(conn, within_min: int) -> list[dict]:
 
 
 def mark_ending_alerted(conn, item_id: str) -> None:
-    """Record the last-hour alert as done (sent, or skipped as ended/over budget).
+    """Record the ending alert as done (sent, or skipped as ended/over budget).
     Also sets notified_at so the row reads as alerted everywhere else."""
     with conn.cursor() as cur:
         cur.execute(

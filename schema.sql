@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS listings_last_seen ON listings (last_seen);
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS is_auction        BOOLEAN;      -- buyingOptions has AUCTION
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS end_date          TIMESTAMPTZ;  -- itemEndDate
 ALTER TABLE listings ADD COLUMN IF NOT EXISTS max_price_minor   INTEGER;      -- cap that admitted it (pence)
-ALTER TABLE listings ADD COLUMN IF NOT EXISTS ending_alerted_at TIMESTAMPTZ;  -- last-hour alert sent/skipped
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS ending_alerted_at TIMESTAMPTZ;  -- ending alert sent/skipped
 -- "Which auctions end soon and haven't had their last-hour alert?"
 CREATE INDEX IF NOT EXISTS listings_auction_ending ON listings (end_date)
     WHERE is_auction AND ending_alerted_at IS NULL;

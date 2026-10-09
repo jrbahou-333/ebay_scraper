@@ -122,7 +122,7 @@ def run_dry(cfg):
     unique = dedupe(kept)
     pickup_km = cfg["location"].get("pickup_km")
     print(f"\n{found} found across searches, {dropped} dropped, {len(unique)} unique kept:\n")
-    print("  (🚗 Close by, within pickup_km · 🔨 auction: alerted only in its last hour"
+    print("  (🚗 Close by, within pickup_km · 🔨 auction: alerted only when close to finishing"
           " · 🔧 fault word in title)\n")
     for x in sorted(unique, key=lambda l: (l.distance_km is None, l.distance_km or 0)):
         flags = (("🚗" if notifier_mod.is_close(x.distance_km, pickup_km) else "  ")
@@ -168,7 +168,8 @@ def run(cfg):
 
 
 def _notify_new(conn, notifier, cfg):
-    # Buy It Now only — auctions wait in the DB for src/auctions.py's last-hour alert.
+    # Buy It Now only — auctions wait in the DB until src/auctions.py finds them
+    # close to finishing.
     pending = db.fetch_unnotified(conn)
     print(f"{len(pending)} new Buy It Now listing(s) to alert.")
     sent = 0

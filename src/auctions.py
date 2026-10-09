@@ -1,9 +1,14 @@
-"""Auction checker: one Telegram alert per auction, in its last hour.
+"""Auction alerts: one Telegram message per auction, only when it's close to finishing.
 
-The 4-hourly scrape (src/main.py) stores auctions but never alerts them. This runs
-every ~15 min (.github/workflows/auctions.yml), finds stored auctions ending within
-`auction_alert_minutes`, re-reads each from eBay for the live bid, and alerts the
-ones still under the price cap that admitted them.
+The scrape (src/main.py) stores auctions but never alerts them. This runs hourly
+(cron-job.org → .github/workflows/auctions.yml), finds stored auctions ending
+within `auction_alert_minutes` (120, so alerts land 60-120 min before the end),
+and sends each one: "⏰ Auction ends in 1h 34m" + price, linked title, Close by.
+
+Timing comes from the end date stored at scrape time — no eBay call needed. eBay
+is asked once more only for the live bid (shown as the price) and to skip
+auctions that ended early or went over budget; if eBay is unreachable the alert
+still goes out with the last-seen price.
 
 Run:
     python -m src.auctions            # alert + mark in DB
@@ -29,13 +34,13 @@ def run(cfg, dry: bool) -> int:
         env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"],
         pickup_km=cfg["location"].get("pickup_km"),
     )
-    lead = cfg.get("auction_alert_minutes", 60)
+    window = cfg.get("auction_alert_minutes", 120)
 
     conn = db.connect(env["DATABASE_URL"])
     try:
         db.ensure_schema(conn)
-        rows = db.fetch_ending_auctions(conn, lead)
-        print(f"{len(rows)} auction(s) ending within {lead} min.")
+        rows = db.fetch_ending_auctions(conn, window)
+        print(f"{len(rows)} auction(s) ending within {window} min.")
         for row in rows:
             check(conn, client, notifier, row, dry)
         return 0
@@ -43,42 +48,48 @@ def run(cfg, dry: bool) -> int:
         conn.close()
 
 
-def check(conn, client, notifier, row, dry: bool) -> None:
-    """Refresh one auction from eBay; alert it unless it has ended or gone over budget."""
+def check(conn, client, notifier, row, dry: bool) -> str:
+    """Alert one auction unless eBay says it has ended or gone over budget.
+    Returns what it decided: "ended", "over_budget", "alert" or "send_failed"."""
     item_id = row["item_id"]
     try:
         item = client.get_item(item_id)
+        live = True
     except EbayError as e:
-        print(f"  ! {item_id}: {e} — will retry next run")
-        return
+        print(f"  ! {item_id}: {e} — alerting from stored data")
+        item, live = None, False
 
     now = datetime.now(timezone.utc)
-    end = db.parse_ts(item.get("itemEndDate")) if item else None
-    if item is None or (end and end <= now):
-        print(f"  {item_id}: ended/removed — skipping")
-        if not dry:
-            db.mark_ending_alerted(conn, item_id)
-        return
+    end = row["end_date"]
+    if live:
+        live_end = db.parse_ts(item.get("itemEndDate")) if item else None
+        if item is None or (live_end and live_end <= now):
+            print(f"  {item_id}: ended/removed — skipping")
+            if not dry:
+                db.mark_ending_alerted(conn, item_id)
+            return "ended"
+        bid = current_price(item)
+        cap = row.get("max_price_minor")
+        if bid is not None and cap is not None and bid > cap:
+            print(f"  {item_id}: bid {_price_str(bid, 'GBP')} over cap {_price_str(cap, 'GBP')} — skipping")
+            if not dry:
+                db.mark_ending_alerted(conn, item_id)
+            return "over_budget"
+        if bid is not None:
+            row["price_minor"] = bid
+        end = live_end or end
 
-    bid = current_price(item)
-    cap = row.get("max_price_minor")
-    if bid is not None and cap is not None and bid > cap:
-        print(f"  {item_id}: bid {_price_str(bid, 'GBP')} over cap {_price_str(cap, 'GBP')} — skipping")
-        if not dry:
-            db.mark_ending_alerted(conn, item_id)
-        return
-
-    row["price_minor"] = bid if bid is not None else row["price_minor"]
-    minutes_left = max(1, round(((end or row["end_date"]) - now).total_seconds() / 60))
-    print(f"  {item_id}: ALERT {_price_str(row['price_minor'], 'GBP')}, "
-          f"{minutes_left} min left — {row['title'][:50]}")
+    minutes_left = max(1, round((end - now).total_seconds() / 60))
+    print(f"  {item_id}: ALERT {minutes_left} min left, "
+          f"{_price_str(row['price_minor'], 'GBP')} — {row['title'][:50]}")
     if dry:
-        return
+        return "alert"
     if notifier.send_ending(row, minutes_left):
         db.mark_ending_alerted(conn, item_id)
         time.sleep(1.0)
-    else:
-        print(f"  send failed for {item_id}; will retry next run")
+        return "alert"
+    print(f"  send failed for {item_id}; will retry next run")
+    return "send_failed"
 
 
 def main():

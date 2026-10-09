@@ -186,6 +186,41 @@ def test_notifier_format_is_minimal():
 
     ending = notifier._format_ending(row, 42, pickup_km=60)
     assert ending.startswith("⏰ Auction ends in 42 min\n<b>£30")
+    assert notifier._format_ending(row, 94).startswith("⏰ Auction ends in 1h 34m\n")
+    assert notifier._format_ending(row, 120).startswith("⏰ Auction ends in 2h 00m\n")
+
+
+def test_auction_check_decisions():
+    from datetime import datetime, timedelta, timezone
+    from src import auctions
+    from src.ebay import EbayError
+
+    class FakeClient:
+        def __init__(self, result):
+            self.result = result
+
+        def get_item(self, item_id):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    soon = datetime.now(timezone.utc) + timedelta(minutes=90)
+    iso = soon.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    row = lambda: {"item_id": "1", "title": "Sage Bambino", "price_minor": 3000,
+                   "end_date": soon, "max_price_minor": 5270}
+    live = lambda bid: {"buyingOptions": ["AUCTION"], "itemEndDate": iso,
+                        "currentBidPrice": {"value": bid}}
+
+    def run(result):
+        r = row()
+        return auctions.check(None, FakeClient(result), None, r, dry=True), r
+
+    status, r = run(live("45.00"))
+    assert status == "alert" and r["price_minor"] == 4500         # live bid shown
+    assert run(live("60.00"))[0] == "over_budget"                 # bid passed £52.70
+    assert run(None)[0] == "ended"                                # 404 from eBay
+    status, r = run(EbayError("eBay down"))
+    assert status == "alert" and r["price_minor"] == 3000         # stored timing + price
 
 
 def _run_all():
