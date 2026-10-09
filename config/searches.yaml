@@ -4,9 +4,16 @@ location:
   postcode: "L1 8JQ"    # centre of the collection radius (Liverpool city centre);
                         # also sent to eBay as the buyer location so distances populate
   country: GB
-  radius_km: 60        
+  radius_km: 60         # default search radius; a search can override (null = UK-wide)
+  pickup_km: 60         # alerts say "📍 Close by" within this distance (collect by car).
+                        # Real km (~37 miles): eBay reports miles, converted in ebay.py.
+                        # Before 2026-10 these numbers were silently miles.
 
 marketplace: EBAY_GB
+
+# Auctions are never alerted when first found — only once, when they end within
+# this many minutes (checked every 15 min by .github/workflows/auctions.yml).
+auction_alert_minutes: 60
 
 # eBay item condition IDs to include:
 #   3000 = Used | 7000 = For parts or not working | 1000 New / 
@@ -26,6 +33,17 @@ retention_days: 30
 #                                #   spaces = AND: "dyson animal"
 #                                #   (a, b)  = OR:  "(dyson v10, dyson v11)"
 #     max_price: 90              # GBP cap, applied by eBay server-side
+#
+# Optional per-search extras:
+#     radius_km: null            # override location.radius_km; null = whole UK
+#     repair_only: true          # only "For parts or not working", or Used with a
+#                                #   fault word (filters.fault_keywords) in the title.
+#                                #   Ignores the global condition_ids.
+#     premium:                   # higher caps for titles naming these models;
+#       - max_price: 200         #   everything else is held to max_price. One or
+#         keywords: [oracle]     #   more tiers; if several match, the highest wins.
+#       - max_price: 150
+#         keywords: [impress]
 #
 # RULE: always set category_ids — a bare keyword search is ~90% spare parts.
 # The category holds whole units; the query refines within it.
@@ -50,25 +68,29 @@ retention_days: 30
 # =============================================================================
 
 searches:
-  - name: "Sage coffee machines (pro and above)"
-    category_ids: [38252, 156775, 159902]
-    query: "sage barista"                       
-    max_price: 150          
-
-  - name: "sage Bambino"
-    category_ids: [38252, 156775, 159902]
-    query: sage bambino
-    max_price: 100
-
-  - name: "Ninja coffee machine"
-    category_ids: [38252, 156775, 159902]
-    query: Ninja coffee machine
-    max_price: 100
-
-  - name: "Sage coffee grinders"
-    category_ids: [32882]               # Coffee Grinders
+  # Broken machines only, UK-wide (far ones need posting — or a message to the
+  # seller if they're collection-only). £50 cap, except the premium models.
+  - name: "Sage coffee machines (faulty)"
+    category_ids: [38252, 65643, 156775, 159902]   # espresso, bean-to-cup, pod, other
     query: "sage"
-    max_price: 50                      # Smart Grinder Pro resells £130-180
+    max_price: 50                       # Bambino, Duo-Temp, Barista Express, Creatista...
+    radius_km: null
+    repair_only: true
+    premium:
+      - max_price: 200
+        keywords: [barista pro, barista touch, oracle, dual boiler]
+      - max_price: 150                  # working used Impress lists ~£300-370 (Oct 2026)
+        keywords: [impress]             # "Barista Touch Impress" still gets the £200 tier
+
+  - name: "Ninja coffee machines (faulty)"
+    category_ids: [38252, 65643, 156775, 159902]
+    query: "ninja"
+    max_price: 50
+    radius_km: null
+    repair_only: true
+    premium:
+      - max_price: 200
+        keywords: [luxe]                # Ninja Luxe Café
 
 
 # --- Previous appliance searches (preserved; uncomment to re-enable) ---
@@ -145,8 +167,10 @@ filters:
     - motor body
     - bin slider
     - handle housing
-    - " part"          # leading space: catches "replacement part"/"motor part"/
-                        # "...roller part" etc without matching "apart"/"compartment"
+    - " part "         # whole word (titles are space-padded, so it matches last word
+                        # too): catches "replacement part"/"Case Part Only" without
+                        # matching "apart"/"compartment" — or "for parts", which on a
+                        # faulty coffee machine means a whole broken unit (keep those)
     - body only
     # -- stand-mixer accessories that share the Stand Mixers category. NB: do NOT
     #    exclude bare "bowl"/"attachment" ("with bowl & attachments" = whole unit
@@ -201,6 +225,9 @@ filters:
     - basket only
     - burr set
     - burrs only
+    - repair service    # "Diagnostic & Repair Service" — a service, not a machine
+    - diagnostic
+    - creami            # Ninja Creami ice-cream maker lands in "Other" (159902)
     # -- novelty / non-white-goods that live in the fridge categories --
     - mini fridge
     - mini-fridge
@@ -220,7 +247,20 @@ filters:
     - car fridge
     - coca-cola
     - budweiser
-  # Flag (🔧) listings whose title suggests an explicit fault — the repair sweet spot.
+  # repair_only searches: a "Used" listing counts as broken if its title has one of
+  # these. Also sent to eBay as an OR-group on the Used request, so keep the whole
+  # list short — eBay caps the query at 100 chars. Substring match client-side:
+  # "fault" covers "faulty", "repair" covers "repairs", "spares" covers "spares or repairs".
+  fault_keywords:
+    - faulty
+    - fault
+    - broken
+    - spares
+    - repair
+    - not working
+    - no power
+    - leaking
+  # Flag (🔧) listings whose title suggests an explicit fault (shown in --dry-run).
   highlight_keywords:
     - spares
     - repair

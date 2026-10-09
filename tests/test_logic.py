@@ -57,6 +57,13 @@ def test_to_listing_maps_fields_and_trims():
     assert x.origin_date == "2026-07-13T09:10:11.000Z"
 
 
+def test_distance_miles_converted_to_km():
+    # EBAY_GB really returns miles (live-verified 2026-10): London reads ~180 'mi'.
+    s = {"itemId": "1", "distanceFromPickupLocation": {"unitOfMeasure": "mi", "value": "35"}}
+    assert _to_listing(s, "x").distance_km == 56.3
+    assert _to_listing({"itemId": "2"}, "x").distance_km is None
+
+
 def test_price_str_formats():
     assert _mk("1", "x", price=3000).price_str == "£30"
     assert _mk("1", "x", price=1250).price_str == "£12.50"
@@ -83,28 +90,102 @@ def test_filters_exclude_and_highlight():
     assert kept[2].highlights == []
 
 
-def test_highlights_for_handles_none():
-    cfg = {"highlight_keywords": ["faulty"]}
-    assert filters.highlights_for("Faulty dryer", cfg) == ["faulty"]
-    assert filters.highlights_for(None, cfg) == []
+def test_repair_only_keeps_only_faulty():
+    fcfg = {"fault_keywords": ["faulty", "spares", "not working"]}
+    scfg = {"repair_only": True}
+    parts = _mk("1", "Sage Bambino coffee machine", cond="For parts or not working")
+    parts.raw["conditionId"] = "7000"
+    listings = [
+        parts,
+        _mk("2", "Sage Bambino FAULTY no steam"),            # Used + fault word
+        _mk("3", "Sage Bambino Plus, good condition"),        # Used, working → drop
+        _mk("4", "Ninja coffee machine spares or repairs"),
+    ]
+    kept, dropped = filters.apply(listings, fcfg, scfg)
+    assert [l.item_id for l in kept] == ["1", "2", "4"] and dropped == 1
 
 
-def test_notifier_format_escapes_and_flags():
-    row = {
-        "item_id": "1", "title": "Hotpoint <washer> & dryer", "price_minor": 3000,
-        "currency": "GBP", "condition": "For parts or not working", "location": "Bootle",
-        "distance_km": 6.2, "url": "https://www.ebay.co.uk/itm/1",
-        "image_url": None, "search_query": "washing machine", "highlights": ["faulty"],
+def test_premium_price_tier():
+    scfg = {"max_price": 50, "premium": {"max_price": 200, "keywords": ["barista pro", "oracle"]}}
+    listings = [
+        _mk("1", "Sage Barista Pro faulty", price=12000),     # premium, under £200
+        _mk("2", "Sage Bambino faulty", price=12000),         # not premium, over £50
+        _mk("3", "Sage Bambino faulty", price=4500),
+        _mk("4", "Sage the Oracle broken", price=25000),      # premium, over £200
+        _mk("5", "Sage Bambino faulty", price=5270),          # £50 + buyer fee → in
+        _mk("6", "Sage Bambino faulty", price=5280),          # just over → out
+    ]
+    kept, dropped = filters.apply(listings, {}, scfg)
+    assert [l.item_id for l in kept] == ["1", "3", "5"] and dropped == 3
+    assert kept[0].max_price_minor == 20870 and kept[1].max_price_minor == 5270
+
+
+def test_multiple_premium_tiers_highest_match_wins():
+    scfg = {"max_price": 50, "premium": [
+        {"max_price": 200, "keywords": ["barista touch"]},
+        {"max_price": 150, "keywords": ["impress"]},
+    ]}
+    assert filters.price_cap("Sage Barista Express Impress faulty", scfg) == 150
+    assert filters.price_cap("Sage Barista Touch Impress faulty", scfg) == 200
+    assert filters.price_cap("Sage Bambino faulty", scfg) == 50
+
+
+def test_part_exclude_spares_whole_word_only():
+    cfg = {"exclude_keywords": [" part "]}
+    listings = [
+        _mk("1", "Sage Duo-Temp Pro / Bottom Case Part Only"),   # a component
+        _mk("2", "Dyson V11 motor part"),                         # last word
+        _mk("3", "Sage Barista Pro For Parts, Untested"),         # whole broken unit
+        _mk("4", "Ninja Luxe Café (For Parts)"),
+        _mk("5", "Dyson V10 compartment, comes apart"),
+    ]
+    kept, _ = filters.apply(listings, cfg)
+    assert [l.item_id for l in kept] == ["3", "4", "5"]
+
+
+def test_auction_fields_use_current_bid():
+    summary = {
+        "itemId": "v1|9|0", "title": "Sage Barista Express",
+        "buyingOptions": ["FIXED_PRICE", "AUCTION"],
+        "price": {"value": "167.10", "currency": "GBP"},          # the BIN price
+        "currentBidPrice": {"value": "94.30", "currency": "GBP"},
+        "itemEndDate": "2026-10-11T12:40:27.000Z",
     }
-    msg = notifier._format(row)
-    assert msg.startswith("🔧")
-    assert "£30" in msg and "6.2 km" in msg
-    assert "&lt;washer&gt; &amp; dryer" in msg     # HTML-escaped
-    assert '<a href="https://www.ebay.co.uk/itm/1">' in msg   # title links to listing
-    assert not msg.splitlines()[-1].startswith("https://")    # no bare URL line
+    x = _to_listing(summary, "sage")
+    assert x.is_auction and x.price_minor == 9430
+    assert x.end_date == "2026-10-11T12:40:27.000Z"
 
-    plain = notifier._format({**row, "highlights": [], "condition": "Used", "price_minor": 1250})
-    assert plain.startswith("🏷") and "£12.50" in plain
+    bin_only = _to_listing({**summary, "buyingOptions": ["FIXED_PRICE"]}, "sage")
+    assert not bin_only.is_auction and bin_only.price_minor == 16710
+
+
+def test_fault_query_or_group():
+    from src.main import fault_query
+    assert fault_query("sage", ["faulty", "not working"]) == 'sage (faulty, "not working")'
+    assert fault_query(None, ["broken"]) == "(broken)"
+
+
+def test_notifier_format_is_minimal():
+    row = {
+        "item_id": "1", "title": "Sage <Bambino> & milk jug", "price_minor": 3000,
+        "currency": "GBP", "condition": "For parts or not working", "location": "Bootle",
+        "distance_km": 5.0, "url": "https://www.ebay.co.uk/itm/1",
+        "image_url": None, "search_query": "sage",
+    }
+    msg = notifier._format(row, pickup_km=60)
+    assert msg.startswith("<b>£30 — ")
+    assert "&lt;Bambino&gt; &amp; milk jug" in msg               # HTML-escaped
+    assert '<a href="https://www.ebay.co.uk/itm/1">' in msg      # title links to listing
+    assert msg.endswith("📍 Close by")
+    for noise in ("km", "Bootle", "parts", "search"):
+        assert noise not in msg
+
+    far = notifier._format({**row, "distance_km": 200.0, "price_minor": 1250}, pickup_km=60)
+    assert "Close by" not in far and "£12.50" in far
+    assert "Close by" not in notifier._format({**row, "distance_km": None}, pickup_km=60)
+
+    ending = notifier._format_ending(row, 42, pickup_km=60)
+    assert ending.startswith("⏰ Auction ends in 42 min\n<b>£30")
 
 
 def _run_all():

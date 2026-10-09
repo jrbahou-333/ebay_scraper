@@ -1,0 +1,34 @@
+name: auctions
+
+# Last-hour auction alerts. The scrape workflow stores auctions; this checks the DB
+# every 15 min for ones ending within auction_alert_minutes (config/searches.yaml)
+# and sends one Telegram alert each. Cheap: a DB query + one eBay call per auction.
+# GitHub can start scheduled runs 5-20 min late, which is why the lead is an hour.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:            # manual "Run workflow" button
+
+concurrency:
+  group: auctions
+  cancel-in-progress: false
+
+jobs:
+  auctions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m src.auctions
+        env:
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

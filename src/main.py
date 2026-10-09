@@ -10,6 +10,7 @@ import sys
 import time
 
 from . import config, db, filters
+from . import notifier as notifier_mod
 from .ebay import EbayClient, EbayError
 from .notifier import Notifier
 
@@ -18,29 +19,70 @@ DEADMAN_THRESHOLD = 3
 DEADMAN_COOLDOWN_S = 12 * 3600
 
 
+USED_CONDITION_ID = 3000
+PARTS_CONDITION_ID = 7000
+EBAY_Q_MAX = 100  # Browse API limit on the `q` parameter length
+
+
+def fault_query(query: str | None, fault_keywords) -> str:
+    """`query` AND any one fault word, in eBay's `(a, b, "c d")` OR syntax."""
+    terms = ", ".join(f'"{k}"' if " " in k else k for k in fault_keywords)
+    q = f"{query} ({terms})" if query else f"({terms})"
+    if len(q) > EBAY_Q_MAX:
+        print(f"  ! fault query is {len(q)} chars (eBay max {EBAY_Q_MAX}); trim fault_keywords")
+    return q
+
+
+def search_one(client: EbayClient, cfg: dict, s: dict, label: str):
+    """Run one configured search, honouring its per-search overrides.
+
+    - `radius_km` (null = UK-wide) overrides location.radius_km.
+    - the highest `premium` tier's max_price is the server-side cap; filters.apply
+      then holds each title to the tier it matches (or the base `max_price`).
+    - `repair_only` makes two requests and merges them: "For parts or not working"
+      with the plain query, plus "Used" with a fault-word OR-group (a plain UK-wide
+      Used search would be mostly working machines).
+    """
+    loc = cfg["location"]
+    radius = s["radius_km"] if "radius_km" in s else loc["radius_km"]
+    top_cap = max([s["max_price"], *(t["max_price"] for t in filters.premium_tiers(s))])
+    server_cap = filters.with_buyer_fee(top_cap) / 100  # fee headroom; see with_buyer_fee
+    if s.get("repair_only"):
+        fault_kw = (cfg.get("filters") or {}).get("fault_keywords") or []
+        passes = [([PARTS_CONDITION_ID], s.get("query")),
+                  ([USED_CONDITION_ID], fault_query(s.get("query"), fault_kw))]
+    else:
+        passes = [(cfg["condition_ids"], s.get("query"))]
+
+    by_id = {}
+    for condition_ids, query in passes:
+        for x in client.search(
+            category_ids=s["category_ids"],
+            query=query,
+            label=label,
+            max_price=server_cap,
+            condition_ids=condition_ids,
+            postcode=loc["postcode"],
+            country=loc["country"],
+            radius_km=radius,
+        ):
+            by_id.setdefault(x.item_id, x)
+    return list(by_id.values())
+
+
 def scrape(client: EbayClient, cfg: dict):
     """Run every configured search; return (kept_listings, total_found, total_dropped)."""
-    loc = cfg["location"]
     kept, found, dropped = [], 0, 0
     searches = cfg["searches"]
     for i, s in enumerate(searches):
         label = s.get("name") or s.get("query") or str(s.get("category_ids"))
         try:
-            results = client.search(
-                category_ids=s["category_ids"],
-                query=s.get("query"),
-                label=label,
-                max_price=s["max_price"],
-                condition_ids=cfg["condition_ids"],
-                postcode=loc["postcode"],
-                country=loc["country"],
-                radius_km=loc["radius_km"],
-            )
+            results = search_one(client, cfg, s, label)
         except EbayError as e:
             print(f"  ! search {label!r} failed: {e}")
             continue
         found += len(results)
-        k, d = filters.apply(results, cfg.get("filters") or {})
+        k, d = filters.apply(results, cfg.get("filters") or {}, s)
         dropped += d
         kept.extend(k)
         print(f"  {label!r}: {len(results)} found, {d} dropped, {len(k)} kept")
@@ -78,18 +120,24 @@ def run_dry(cfg):
     print("DRY RUN — no DB writes, no Telegram sends\n")
     kept, found, dropped = scrape(client, cfg)
     unique = dedupe(kept)
+    pickup_km = cfg["location"].get("pickup_km")
     print(f"\n{found} found across searches, {dropped} dropped, {len(unique)} unique kept:\n")
+    print("  (🚗 Close by, within pickup_km · 🔨 auction: alerted only in its last hour"
+          " · 🔧 fault word in title)\n")
     for x in sorted(unique, key=lambda l: (l.distance_km is None, l.distance_km or 0)):
-        flag = "🔧" if x.highlights else "  "
+        flags = (("🚗" if notifier_mod.is_close(x.distance_km, pickup_km) else "  ")
+                 + ("🔨" if x.is_auction else "  ")
+                 + ("🔧" if x.highlights else "  "))
         dist = f"{x.distance_km}km" if x.distance_km is not None else "?"
-        print(f"  {flag} {x.price_str:>7} | {dist:>7} | {(x.condition or '?'):<24.24} | {x.title:.48}")
+        print(f"  {flags} {x.price_str:>7} | {dist:>7} | {(x.condition or '?'):<24.24} | {x.title:.48}")
     return 0
 
 
 def run(cfg):
     env = config.require_env("DATABASE_URL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
     client = make_client(cfg)
-    notifier = Notifier(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"])
+    notifier = Notifier(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"],
+                        pickup_km=cfg["location"].get("pickup_km"))
     conn = db.connect(env["DATABASE_URL"])
     try:
         db.ensure_schema(conn)
@@ -120,11 +168,11 @@ def run(cfg):
 
 
 def _notify_new(conn, notifier, cfg):
+    # Buy It Now only — auctions wait in the DB for src/auctions.py's last-hour alert.
     pending = db.fetch_unnotified(conn)
-    print(f"{len(pending)} new listing(s) to alert.")
+    print(f"{len(pending)} new Buy It Now listing(s) to alert.")
     sent = 0
     for row in pending:
-        row["highlights"] = filters.highlights_for(row["title"], cfg.get("filters") or {})
         if notifier.send_listing(row):
             db.mark_notified(conn, row["item_id"])  # commit per-send: crash-safe, no double-sends
             sent += 1

@@ -11,7 +11,34 @@ and flip, within a ~30-minute drive of **Liverpool**, and alerts new ones to
 
 Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
 
-## Current status (2026-08-12)
+## Current status (2026-10-09)
+
+- **Focus is now faulty coffee machines only** (Dyson/KitchenAid commented out,
+  grinders removed). Two searches, "Sage coffee machines (faulty)" and "Ninja
+  coffee machines (faulty)", across cats 38252/65643/156775/159902:
+  - **UK-wide** (`radius_km: null`), incl. collection-only listings (the seller
+    may post if asked). Alerts say **"📍 Close by"** within `pickup_km` (60 km).
+  - **`repair_only`**: "For parts or not working", plus "Used" with a fault word
+    (sent to eBay as an OR-group, and re-checked client-side).
+  - **£50 cap, £200 for premium titles** (barista pro/touch, oracle, dual boiler,
+    Ninja luxe), **£150 for the Express Impress** (a working used one lists at
+    ~£300–370). Caps are asking prices: see the buyer-fee gotcha below.
+- **Alerts are minimal by request:** price + linked title + "Close by". No km,
+  condition or search label. Jack opens the listing for the rest.
+- **Buy It Now is alerted on discovery. Auctions never are**: `src/auctions.py`
+  (every 15 min, `.github/workflows/auctions.yml`) sends one "⏰ Auction ends in
+  N min" alert when a stored auction ends within `auction_alert_minutes` (60).
+  It re-reads the live bid first and skips if the bid is now over the cap.
+- **Distance unit bug fixed (2026-10-09):** eBay reports MILES. Every earlier
+  "km" figure in this file (25→40→60 km radius) was really miles.
+- Live dry-run at this point: 61 found → 43 dropped → 18 kept (4 auctions).
+  `" part"` became `" part "` (whole word), because on coffee machines "for
+  parts" means a whole broken unit and it was dropping a £180 Barista Pro.
+  Added `repair service`, `diagnostic`, `creami` excludes.
+- **Not yet done:** first real scrape and auctions run in Actions after this
+  change. The first scrape will alert the ~14 BIN listings in one burst.
+
+## Earlier status (2026-08-12)
 
 - **LIVE.** All credentials exist (local `.env` + GitHub Actions secrets): eBay
   App ID + Cert ID, Neon `DATABASE_URL`, Telegram bot (@JB333_Ebay_bot, chat id
@@ -66,6 +93,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 python -m src.main --dry-run     # search + filter + print; NO DB writes, NO Telegram
 python -m src.ebay --probe [i]   # validate eBay contract for search index i (default 0)
 python -m src.main               # full run: writes to DB, sends Telegram alerts
+python -m src.auctions --dry-run # list auctions ending within the hour; no sends/marks
+                                 #   (does apply idempotent schema migrations)
+python -m src.auctions           # send last-hour auction alerts
 python -m tests.test_logic       # offline unit tests (also run in CI on push)
 ```
 
@@ -104,7 +134,8 @@ run. Example: `EBAY_OAUTH_TOKEN="$(cat token.txt)" python -m src.main --dry-run`
 | `src/db.py` | psycopg3: `ensure_schema`, `upsert`, `is_empty`, `fetch_unnotified`, `mark_notified`, `prune`, `get_state`/`set_state`. |
 | `src/filters.py` | Keyword `exclude`/`highlight` logic over `Listing.title`. |
 | `src/notifier.py` | Telegram `sendPhoto`/`sendMessage`, one message per listing. |
-| `src/main.py` | Orchestrator: `scrape` → `dedupe` → `upsert` → notify. `--dry-run`, dead-man switch, baseline guard. |
+| `src/main.py` | Orchestrator: `scrape` → `dedupe` → `upsert` → notify (Buy It Now only). `search_one` applies per-search overrides. `--dry-run`, dead-man switch, baseline guard. |
+| `src/auctions.py` | Last-hour auction alerts: `fetch_ending_auctions` → `get_item` (live bid) → `send_ending`. |
 | `src/config.py` | Loads `config/searches.yaml` + `.env`; `require_env`. |
 | `config/searches.yaml` | All tuning: location, price caps, category-driven searches, keyword filters. Edited freely, reloaded each run. |
 | `schema.sql` | `listings` (PK = eBay `item_id`) + `state` tables. |
@@ -123,9 +154,10 @@ request code in `src/ebay.py`:
    and `,` percent-encoded) — this populates `distanceFromPickupLocation`. Then
    `sort=distance` (nearest first) and **stop paging when an item exceeds
    `radius_km`**. See `_context_header()` and `search()`.
-3. **`distanceFromPickupLocation` is coarse** — nearby items all report a floored
-   value (~5), far items report real values (135, 205, 5155...). Good enough as a
-   local/not-local gate at the radius boundary; useless for fine ranking.
+3. **`distanceFromPickupLocation` is in MILES** (`unitOfMeasure: "mi"`) and
+   rounded to 5. Nearby items floor at 5. `_distance_km` converts to km. It
+   was read as km until 2026-10-09: London showed as "180 km" from Liverpool.
+   Good enough as a local/not-local gate. Useless for fine ranking.
 4. **Only ONE `category_ids` per request** (error 12030 otherwise). `search()`
    loops each category id and merges/dedupes by `item_id`.
 5. **Search by CATEGORY, not keywords.** A bare keyword search is ~90% spare
@@ -139,10 +171,26 @@ request code in `src/ebay.py`:
 7. **Auth:** OAuth2 client-credentials. `POST identity/v1/oauth2/token`, HTTP
    Basic `base64(ClientID:ClientSecret)`, `scope=.../oauth/api_scope`. Token ~2h.
 8. Always send `X-EBAY-C-MARKETPLACE-ID: EBAY_GB`.
+9. **Prices from private sellers include the Buyer Protection Fee** (£0.70 + 4%
+   in the £20–£300 band). A £50 asking price comes back as £52.70.
+   `filters.with_buyer_fee` adds this headroom to every cap, server and client.
+10. **Auctions:** `buyingOptions` contains `"AUCTION"` (often alongside
+    `"FIXED_PRICE"`). On those, `price` is the **BIN** price and the bid is in
+    `currentBidPrice`. The end time is `itemEndDate`. `current_price()` handles
+    this. `GET buy/browse/v1/item/{url-quoted v1|…|0 id}` returns a live bid and
+    404s for unknown ids.
+11. A `q` OR-group works with an AND term: `sage (faulty, broken, "not working")`.
+    `q` is capped at 100 chars, so keep `fault_keywords` short.
 
 ## Config model (`config/searches.yaml`)
 
-- `location.postcode` seeds the ENDUSERCTX header; `radius_km` enforced client-side.
+- `location.postcode` seeds the ENDUSERCTX header. `radius_km` is enforced
+  client-side. `pickup_km` drives "📍 Close by".
+- Per-search overrides: `radius_km` (null = UK-wide), `repair_only` (ignores
+  `condition_ids`, uses `filters.fault_keywords`), and
+  `premium`: a list of `{max_price, keywords}` tiers. The highest matching tier
+  wins, and a single dict also works.
+- `auction_alert_minutes`: the lead time for the single auction alert.
 - `condition_ids: [3000, 7000]` = Used + For parts or not working.
 - Each search: `name`, `category_ids` (list, queried one-by-one), optional
   `query`, `max_price` (GBP, server-side cap).
@@ -156,7 +204,9 @@ request code in `src/ebay.py`:
 ## Deployment (GitHub Actions)
 
 - Public repo `jrbahou-333/ebay_scraper` → unlimited free Actions minutes.
-- `.github/workflows/scrape.yml` runs the pipeline on a cron (2-hourly daytime);
+- `.github/workflows/scrape.yml` runs the pipeline on a cron (4-hourly daytime).
+  `.github/workflows/auctions.yml` runs `src.auctions` every 15 min, around the
+  clock. GitHub often starts scheduled runs 5–20 min late, hence the 60-min lead.
   `.github/workflows/test.yml` runs the offline unit tests on every push.
 - All five Actions **secrets** are set and verified: `EBAY_CLIENT_ID`,
   `EBAY_CLIENT_SECRET`, `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`

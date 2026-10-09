@@ -48,11 +48,12 @@ def is_empty(conn) -> bool:
         return cur.fetchone()[0]
 
 
-def _origin_ts(listing: Listing):
-    if not listing.origin_date:
+def parse_ts(value: str | None):
+    """eBay ISO timestamp ('...Z') → aware datetime, or None."""
+    if not value:
         return None
     try:
-        return datetime.fromisoformat(listing.origin_date.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
 
@@ -62,22 +63,28 @@ def upsert(conn, listings, *, mark_notified: bool) -> None:
 
     New rows get notified_at pre-set to now() when mark_notified is True (baseline
     run), so the first ever run doesn't alert on the whole backlog. Existing rows
-    keep their notified_at (never re-alert) and just bump last_seen + distance.
+    keep their notified_at (never re-alert) and just bump last_seen + distance,
+    plus the auction fields (which also backfills rows from before they existed).
     """
     notified_expr = "now()" if mark_notified else "NULL"
     sql = f"""
         INSERT INTO listings (
             item_id, title, price_minor, currency, condition, location,
-            distance_km, url, image_url, search_query, origin_date, raw, notified_at
+            distance_km, url, image_url, search_query, origin_date, raw, notified_at,
+            is_auction, end_date, max_price_minor
         ) VALUES (
             %(item_id)s, %(title)s, %(price_minor)s, %(currency)s, %(condition)s, %(location)s,
-            %(distance_km)s, %(url)s, %(image_url)s, %(search_query)s, %(origin_date)s, %(raw)s, {notified_expr}
+            %(distance_km)s, %(url)s, %(image_url)s, %(search_query)s, %(origin_date)s, %(raw)s, {notified_expr},
+            %(is_auction)s, %(end_date)s, %(max_price_minor)s
         )
         ON CONFLICT (item_id) DO UPDATE SET
-            last_seen   = now(),
-            distance_km = EXCLUDED.distance_km,
-            price_minor = EXCLUDED.price_minor,
-            title       = EXCLUDED.title
+            last_seen       = now(),
+            distance_km     = EXCLUDED.distance_km,
+            price_minor     = EXCLUDED.price_minor,
+            title           = EXCLUDED.title,
+            is_auction      = EXCLUDED.is_auction,
+            end_date        = EXCLUDED.end_date,
+            max_price_minor = EXCLUDED.max_price_minor
     """
     with conn.cursor() as cur:
         for x in listings:
@@ -94,27 +101,70 @@ def upsert(conn, listings, *, mark_notified: bool) -> None:
                     "url": x.url,
                     "image_url": x.image_url,
                     "search_query": x.search_query,
-                    "origin_date": _origin_ts(x),
+                    "origin_date": parse_ts(x.origin_date),
                     "raw": Jsonb(x.raw),
+                    "is_auction": x.is_auction,
+                    "end_date": parse_ts(x.end_date),
+                    "max_price_minor": x.max_price_minor,
                 },
             )
     conn.commit()
 
 
+_ALERT_COLS = """item_id, title, price_minor, currency, condition, location,
+                 distance_km, url, image_url, search_query"""
+
+
+def _dicts(cur) -> list[dict]:
+    cols = [c.name for c in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
 def fetch_unnotified(conn) -> list[dict]:
-    """Rows still awaiting a Telegram alert (notified_at IS NULL)."""
+    """Buy It Now rows still awaiting a Telegram alert (notified_at IS NULL).
+
+    Auctions are excluded: they're alerted once, in their last hour, by
+    fetch_ending_auctions / src/auctions.py.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            """
-            SELECT item_id, title, price_minor, currency, condition, location,
-                   distance_km, url, image_url, search_query
+            f"""
+            SELECT {_ALERT_COLS}
             FROM listings
-            WHERE notified_at IS NULL
+            WHERE notified_at IS NULL AND NOT COALESCE(is_auction, false)
             ORDER BY origin_date DESC NULLS LAST, first_seen DESC
             """
         )
-        cols = [c.name for c in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        return _dicts(cur)
+
+
+def fetch_ending_auctions(conn, within_min: int) -> list[dict]:
+    """Auctions ending in the next `within_min` minutes with no last-hour alert yet."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT {_ALERT_COLS}, end_date, max_price_minor
+            FROM listings
+            WHERE is_auction AND ending_alerted_at IS NULL
+              AND end_date > now() AND end_date <= now() + make_interval(mins => %s)
+            ORDER BY end_date
+            """,
+            (within_min,),
+        )
+        return _dicts(cur)
+
+
+def mark_ending_alerted(conn, item_id: str) -> None:
+    """Record the last-hour alert as done (sent, or skipped as ended/over budget).
+    Also sets notified_at so the row reads as alerted everywhere else."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE listings SET ending_alerted_at = now(),
+                                   notified_at = COALESCE(notified_at, now())
+               WHERE item_id = %s""",
+            (item_id,),
+        )
+    conn.commit()
 
 
 def mark_notified(conn, item_id: str) -> None:

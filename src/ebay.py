@@ -31,6 +31,7 @@ import requests
 
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+ITEM_URL = "https://api.ebay.com/buy/browse/v1/item/"
 SCOPE = "https://api.ebay.com/oauth/api_scope"
 
 PAGE_SIZE = 50
@@ -52,6 +53,9 @@ class Listing:
     search_query: str  # the search label this came from
     raw: dict = field(repr=False, default_factory=dict)
     highlights: list[str] = field(default_factory=list)  # matched highlight keywords (set by filters)
+    is_auction: bool = False         # buyingOptions has AUCTION (possibly alongside a BIN price)
+    end_date: str | None = None      # itemEndDate — set for auctions
+    max_price_minor: int | None = None  # the price cap that admitted it (set by filters)
 
     @property
     def price_str(self) -> str:
@@ -112,14 +116,35 @@ def _location_str(item_location: dict | None) -> str | None:
     return None
 
 
+KM_PER_MILE = 1.609344
+
+
 def _distance_km(summary: dict) -> float | None:
+    """distanceFromPickupLocation in km. EBAY_GB reports MILES (unitOfMeasure 'mi',
+    rounded to 5) — before 2026-10 this was misread as km, so old "40km"/"60km"
+    radii were really 40/60 miles."""
     dist = summary.get("distanceFromPickupLocation")
     if isinstance(dist, dict) and dist.get("value") is not None:
         try:
-            return round(float(dist["value"]), 1)
+            value = float(dist["value"])
         except (TypeError, ValueError):
             return None
+        if str(dist.get("unitOfMeasure", "")).lower() in ("mi", "mile", "miles"):
+            value *= KM_PER_MILE
+        return round(value, 1)
     return None
+
+
+def _is_auction(summary: dict) -> bool:
+    return "AUCTION" in (summary.get("buyingOptions") or [])
+
+
+def current_price(summary: dict) -> int | None:
+    """Price in pence that a buyer faces now. For an auction that's the current
+    bid: eBay's `price` on an auction-with-BIN is the Buy It Now price instead."""
+    if _is_auction(summary) and summary.get("currentBidPrice"):
+        return _to_pence(summary["currentBidPrice"])
+    return _to_pence(summary.get("price"))
 
 
 def _to_listing(summary: dict, label: str) -> Listing:
@@ -129,7 +154,7 @@ def _to_listing(summary: dict, label: str) -> Listing:
     return Listing(
         item_id=summary["itemId"],
         title=summary.get("title", "").strip(),
-        price_minor=_to_pence(summary.get("price")),
+        price_minor=current_price(summary),
         currency=(summary.get("price") or {}).get("currency", "GBP"),
         condition=summary.get("condition"),
         location=_location_str(summary.get("itemLocation")),
@@ -140,6 +165,8 @@ def _to_listing(summary: dict, label: str) -> Listing:
         origin_date=summary.get("itemOriginDate") or summary.get("itemCreationDate"),
         search_query=label,
         raw=summary,
+        is_auction=_is_auction(summary),
+        end_date=summary.get("itemEndDate"),
     )
 
 
@@ -213,6 +240,7 @@ class EbayClient:
     ) -> list[Listing]:
         """Return whole-appliance Listings within `radius_km`, nearest first.
 
+        `radius_km=None` means UK-wide (no radius cut-off; only `max_pages` bounds it).
         eBay's Browse API accepts only ONE category per request, so we query each
         category id separately and merge (deduping by item id — a listing can only
         live in one category anyway, but a `query` refinement could overlap).
@@ -262,13 +290,33 @@ class EbayClient:
             stop = False
             for s in summaries:
                 listing = _to_listing(s, label)
-                if listing.distance_km is not None and listing.distance_km > radius_km:
+                if (radius_km is not None and listing.distance_km is not None
+                        and listing.distance_km > radius_km):
                     stop = True  # distance-sorted, so everything after is further too
                     break
                 kept.append(listing)
             if stop or len(summaries) < page_size:
                 break
+        else:
+            print(f"  ! {label!r} cat={category_id}: hit the {max_pages}-page cap; "
+                  "furthest results were cut — narrow the query or radius")
         return kept
+
+    def get_item(self, item_id: str) -> dict | None:
+        """Fetch one item's live detail (current bid, end date). None if it's gone."""
+        resp = self._session.get(
+            ITEM_URL + urllib.parse.quote(item_id, safe=""),
+            headers={
+                "Authorization": f"Bearer {self._get_token()}",
+                "X-EBAY-C-MARKETPLACE-ID": self.marketplace,
+            },
+            timeout=30,
+        )
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise EbayError(f"get_item({item_id}) failed ({resp.status_code}): {resp.text[:300]}")
+        return resp.json()
 
 
 def _make_probe_client(cfg):
@@ -285,7 +333,7 @@ def _make_probe_client(cfg):
 
 
 def _probe():
-    """Milestone-0 gate: token + one live category search, printed for inspection."""
+    """Milestone-0 gate: token + one live search (with its per-search overrides), printed."""
     from . import config
 
     config.load_env()
@@ -293,31 +341,26 @@ def _probe():
     loc = cfg["location"]
     s = cfg["searches"][int(sys.argv[2]) if len(sys.argv) > 2 else 0]
 
+    from .main import search_one
+
     client = _make_probe_client(cfg)
+    radius = s["radius_km"] if "radius_km" in s else loc["radius_km"]
     print(
         f"Probing eBay: {s.get('name', s.get('query'))!r} "
-        f"categories={s['category_ids']} max=£{s['max_price']} "
-        f"radius={loc['radius_km']}km postcode={loc['postcode']} conditions={cfg['condition_ids']}"
+        f"categories={s['category_ids']} max=£{s['max_price']} premium={s.get('premium')} "
+        f"radius={radius or 'UK-wide'}km postcode={loc['postcode']} repair_only={s.get('repair_only', False)}"
     )
     try:
-        listings = client.search(
-            category_ids=s["category_ids"],
-            query=s.get("query"),
-            label=s.get("name"),
-            max_price=s["max_price"],
-            condition_ids=cfg["condition_ids"],
-            postcode=loc["postcode"],
-            country=loc["country"],
-            radius_km=loc["radius_km"],
-        )
+        listings = search_one(client, cfg, s, s.get("name") or "probe")
     except EbayError as e:
         print(f"\nFAILED: {e}")
         sys.exit(1)
 
-    print(f"\nOK — {len(listings)} listings within {loc['radius_km']}km:\n")
+    print(f"\nOK — {len(listings)} raw listings (before keyword filters):\n")
     for x in sorted(listings, key=lambda l: (l.distance_km is None, l.distance_km or 0)):
         dist = f"{x.distance_km}km" if x.distance_km is not None else "?"
-        print(f"  {x.price_str:>7} | {dist:>7} | {(x.condition or '?'):<20.20} | {(x.location or '?'):<8.8} | {x.title:.44}")
+        kind = f"AUCTION ends {x.end_date}" if x.is_auction else "BIN"
+        print(f"  {x.price_str:>7} | {dist:>7} | {(x.condition or '?'):<20.20} | {kind:<36} | {x.title:.44}")
         print(f"          {x.url}")
     sys.exit(0)
 
