@@ -34,8 +34,20 @@ def _iter_statements(sql: str):
             yield chunk
 
 
+# Arbitrary constant naming the "schema migration" advisory lock.
+SCHEMA_LOCK_ID = 7_301_986_405
+
+
 def ensure_schema(conn) -> None:
+    """Apply schema.sql. Serialized across processes with an advisory lock.
+
+    The scrape and auction workflows can start in the same second. Each one's
+    CREATE INDEX takes a SHARE lock on listings, then ALTER TABLE (even a no-op
+    ADD COLUMN IF NOT EXISTS) wants ACCESS EXCLUSIVE, so the two deadlocked.
+    The lock is released at commit, so the second run just waits a moment.
+    """
     with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_ID,))
         for statement in _iter_statements(SCHEMA_PATH.read_text()):
             cur.execute(statement)
     conn.commit()
