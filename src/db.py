@@ -4,6 +4,7 @@ One row per eBay item_id. Re-seeing an item refreshes last_seen (and distance);
 it never creates a second row, so adding search terms does not multiply rows.
 """
 
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -39,17 +40,34 @@ SCHEMA_LOCK_ID = 7_301_986_405
 
 
 def ensure_schema(conn) -> None:
-    """Apply schema.sql. Serialized across processes with an advisory lock.
+    """Apply schema.sql, but only when it has changed since it was last applied.
 
-    The scrape and auction workflows can start in the same second. Each one's
-    CREATE INDEX takes a SHARE lock on listings, then ALTER TABLE (even a no-op
-    ADD COLUMN IF NOT EXISTS) wants ACCESS EXCLUSIVE, so the two deadlocked.
-    The lock is released at commit, so the second run just waits a moment.
+    The scrape and auction workflows can start in the same second. Even no-op
+    DDL (CREATE INDEX / ADD COLUMN IF NOT EXISTS) takes heavy locks on listings,
+    and those deadlocked against the other run's DDL and later its INSERTs.
+    So the file's hash is kept in `state` and an unchanged schema runs no DDL at
+    all. The advisory lock serializes the rare run that does apply it.
     """
+    sql = SCHEMA_PATH.read_text()
+    digest = hashlib.sha256(sql.encode()).hexdigest()
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(%s)", (SCHEMA_LOCK_ID,))
-        for statement in _iter_statements(SCHEMA_PATH.read_text()):
+        cur.execute("SELECT to_regclass('state') IS NOT NULL")
+        if cur.fetchone()[0]:
+            cur.execute("SELECT value FROM state WHERE key = 'schema_sha256'")
+            row = cur.fetchone()
+            if row and row[0] == digest:
+                conn.commit()
+                return
+        for statement in _iter_statements(sql):
             cur.execute(statement)
+        cur.execute(
+            """
+            INSERT INTO state (key, value, updated_at) VALUES ('schema_sha256', %s, now())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+            """,
+            (Jsonb(digest),),
+        )
     conn.commit()
 
 

@@ -141,7 +141,7 @@ run. Example: `EBAY_OAUTH_TOKEN="$(cat token.txt)" python -m src.main --dry-run`
 | `src/auctions.py` | Last-hour auction alerts: `fetch_ending_auctions` → `get_item` (live bid) → `send_ending`. |
 | `src/config.py` | Loads `config/searches.yaml` + `.env`; `require_env`. |
 | `config/searches.yaml` | All tuning: location, price caps, category-driven searches, keyword filters. Edited freely, reloaded each run. |
-| `schema.sql` | `listings` (PK = eBay `item_id`) + `state` tables. |
+| `schema.sql` | `listings` (PK = eBay `item_id`) + `state` tables. Applied only when its sha256 differs from `state.schema_sha256`: no-op DDL still locks `listings` and deadlocked the concurrent scrape/auctions runs (2026-10-09/10). |
 | `archive/fb_marketplace/` | Abandoned Facebook spike (see history). Not wired in. |
 
 ## eBay Browse API — hard-won gotchas (DON'T re-learn these)
