@@ -142,6 +142,7 @@ def run(cfg):
     try:
         db.ensure_schema(conn)
         baseline = db.is_empty(conn)
+        conn.commit()  # don't hold a lock on listings while scraping eBay
 
         kept, found, dropped = scrape(client, cfg)
         unique = dedupe(kept)
