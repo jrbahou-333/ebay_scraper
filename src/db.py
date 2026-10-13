@@ -1,7 +1,8 @@
 """Postgres persistence: schema, upsert, notify-diff, dead-man state, retention prune.
 
-One row per eBay item_id. Re-seeing an item refreshes last_seen (and distance);
-it never creates a second row, so adding search terms does not multiply rows.
+One row per listing item_id (eBay's, or "gt:<id>" for Gumtree). Re-seeing an item
+refreshes last_seen (and distance); it never creates a second row, so adding
+search terms does not multiply rows.
 """
 
 import hashlib
@@ -71,11 +72,24 @@ def ensure_schema(conn) -> None:
     conn.commit()
 
 
-def is_empty(conn) -> bool:
-    """True if the listings table has no rows (used for the baseline guard)."""
+def is_empty(conn, source: str | None = None) -> bool:
+    """True if the listings table has no rows (for `source`, if given)."""
     with conn.cursor() as cur:
-        cur.execute("SELECT NOT EXISTS (SELECT 1 FROM listings)")
+        if source:
+            cur.execute("SELECT NOT EXISTS (SELECT 1 FROM listings WHERE source = %s)", (source,))
+        else:
+            cur.execute("SELECT NOT EXISTS (SELECT 1 FROM listings)")
         return cur.fetchone()[0]
+
+
+def needs_baseline(conn, source: str) -> bool:
+    """True until a site's first successful run, which stores without alerting.
+
+    Keyed per site, so adding Gumtree to a live eBay DB doesn't burst-alert every
+    Gumtree listing already up. A site with rows from before this flag existed
+    (eBay) counts as done.
+    """
+    return not get_state(conn, f"baseline_done:{source}", False) and is_empty(conn, source)
 
 
 def parse_ts(value: str | None):
@@ -101,11 +115,11 @@ def upsert(conn, listings, *, mark_notified: bool) -> None:
         INSERT INTO listings (
             item_id, title, price_minor, currency, condition, location,
             distance_km, url, image_url, search_query, origin_date, raw, notified_at,
-            is_auction, end_date, max_price_minor
+            is_auction, end_date, max_price_minor, source
         ) VALUES (
             %(item_id)s, %(title)s, %(price_minor)s, %(currency)s, %(condition)s, %(location)s,
             %(distance_km)s, %(url)s, %(image_url)s, %(search_query)s, %(origin_date)s, %(raw)s, {notified_expr},
-            %(is_auction)s, %(end_date)s, %(max_price_minor)s
+            %(is_auction)s, %(end_date)s, %(max_price_minor)s, %(source)s
         )
         ON CONFLICT (item_id) DO UPDATE SET
             last_seen       = now(),
@@ -136,13 +150,14 @@ def upsert(conn, listings, *, mark_notified: bool) -> None:
                     "is_auction": x.is_auction,
                     "end_date": parse_ts(x.end_date),
                     "max_price_minor": x.max_price_minor,
+                    "source": x.source,
                 },
             )
     conn.commit()
 
 
 _ALERT_COLS = """item_id, title, price_minor, currency, condition, location,
-                 distance_km, url, image_url, search_query"""
+                 distance_km, url, image_url, search_query, source"""
 
 
 def _dicts(cur) -> list[dict]:

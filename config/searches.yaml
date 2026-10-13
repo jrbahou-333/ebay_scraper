@@ -4,7 +4,8 @@ location:
   postcode: "L1 8JQ"    # centre of the collection radius (Liverpool city centre);
                         # also sent to eBay as the buyer location so distances populate
   country: GB
-  radius_km: 60         # default search radius; a search can override (null = UK-wide)
+  radius_km: 60         # default eBay radius; a search's ebay: block can override
+                        # (null = UK-wide). Gumtree uses its own gumtree.radius_miles.
   pickup_km: 60         # alerts say "📍 Close by" within this distance (collect by car).
                         # Real km (~37 miles): eBay reports miles, converted in ebay.py.
                         # Before 2026-10 these numbers were silently miles.
@@ -26,28 +27,43 @@ condition_ids: [3000, 2500, 7000]
 retention_days: 30
 
 # ============================== HOW TO EDIT ==================================
-# Each search is 4 lines. Copy this template, edit, save — next run picks it up:
+# Each search names WHAT to look for once, then WHERE in one block per site.
+# Copy this template, edit, save — next run picks it up:
 #
-#   - name: "My search"          # label shown in Telegram alerts
-#     category_ids: [20614]      # eBay category id(s) — see the list below
-#     query: "dyson"             # optional keywords WITHIN the category;
+#   - name: "My search"          # label (dry-run / logs)
+#     query: "dyson"             # keywords, used on every site. On eBay:
 #                                #   spaces = AND: "dyson animal"
 #                                #   (a, b)  = OR:  "(dyson v10, dyson v11)"
-#     max_price: 90              # GBP cap, applied by eBay server-side
+#                                #   Gumtree has no OR: keep it to a plain word.
+#     max_price: 90              # GBP cap (asking price) on every site
+#     ebay:                      # omit to skip eBay
+#       category_ids: [20614]    #   eBay category id(s) — see the list below
+#       radius_km: null          #   optional: override location.radius_km; null = whole UK
+#     gumtree:                   # omit to skip Gumtree
+#       category: coffee-machines  # the slug from a gumtree.com/search URL
+#       radius_miles: 30         #   Gumtree's own radius, MILES from location.postcode.
+#                                #   Keep it local: Gumtree is mostly collection-only.
 #
-# Optional per-search extras:
-#     radius_km: null            # override location.radius_km; null = whole UK
-#     repair_only: true          # only "For parts or not working", or Used with a
+# Either block may also set its own `query` if a site needs different wording.
+# An old-style search with category_ids at the top level still works (eBay only).
+#
+# Optional per-search extras (apply to every site):
+#     repair_only: true          # eBay: "For parts or not working", or Used with a
 #                                #   fault word (filters.fault_keywords) in the title.
 #                                #   Ignores the global condition_ids.
+#                                # Gumtree (no condition field): a fault word in the
+#                                #   title or the description snippet.
 #     premium:                   # higher caps for titles naming these models;
 #       - max_price: 200         #   everything else is held to max_price. One or
 #         keywords: [oracle]     #   more tiers; if several match, the highest wins.
 #       - max_price: 150
 #         keywords: [impress]
 #
-# RULE: always set category_ids — a bare keyword search is ~90% spare parts.
-# The category holds whole units; the query refines within it.
+# RULE: always set a category on each site — a bare eBay keyword search is ~90%
+# spare parts. The category holds whole units; the query refines within it.
+#
+# Gumtree categories: open gumtree.com, pick the category, read the
+# `search_category=` value from the URL. Confirmed: coffee-machines.
 #
 # Confirmed EBAY_GB category ids:
 #   20614  Vacuum Cleaners            133701 Stand Mixers
@@ -72,26 +88,34 @@ searches:
   # Broken machines only, UK-wide (far ones need posting — or a message to the
   # seller if they're collection-only). £50 cap, except the premium models.
   - name: "Sage coffee machines (faulty)"
-    category_ids: [38252, 65643, 156775, 159902]   # espresso, bean-to-cup, pod, other
     query: "sage"
     max_price: 50                       # Bambino, Duo-Temp, Barista Express, Creatista...
-    radius_km: null
     repair_only: true
     premium:
       - max_price: 200
         keywords: [barista pro, barista touch, oracle, dual boiler]
       - max_price: 150                  # working used Impress lists ~£300-370 (Oct 2026)
         keywords: [impress]             # "Barista Touch Impress" still gets the £200 tier
+    ebay:
+      category_ids: [38252, 65643, 156775, 159902]   # espresso, bean-to-cup, pod, other
+      radius_km: null
+    gumtree:
+      category: coffee-machines
+      radius_miles: 30
 
   - name: "Ninja coffee machines (faulty)"
-    category_ids: [38252, 65643, 156775, 159902]
     query: "ninja"
     max_price: 50
-    radius_km: null
     repair_only: true
     premium:
       - max_price: 200
         keywords: [luxe]                # Ninja Luxe Café
+    ebay:
+      category_ids: [38252, 65643, 156775, 159902]
+      radius_km: null
+    gumtree:
+      category: coffee-machines
+      radius_miles: 30
 
 
 # --- Previous appliance searches (preserved; uncomment to re-enable) ---
