@@ -40,7 +40,8 @@ retention_days: 30
 #       category_ids: [20614]    #   eBay category id(s) — see the list below
 #       radius_km: null          #   optional: override location.radius_km; null = whole UK
 #     gumtree:                   # omit to skip Gumtree
-#       category: coffee-machines  # the slug from a gumtree.com/search URL
+#       categories: [coffee-machines]  # slug(s) from a gumtree.com/search URL,
+#                                #   queried one by one (each is a request)
 #       radius_miles: 30         #   Gumtree's own radius, MILES from location.postcode.
 #                                #   Keep it local: Gumtree is mostly collection-only.
 #
@@ -63,7 +64,8 @@ retention_days: 30
 # spare parts. The category holds whole units; the query refines within it.
 #
 # Gumtree categories: open gumtree.com, pick the category, read the
-# `search_category=` value from the URL. Confirmed: coffee-machines.
+# `search_category=` value from the URL. Confirmed: coffee-machines,
+# espresso-machines.
 #
 # Confirmed EBAY_GB category ids:
 #   20614  Vacuum Cleaners            133701 Stand Mixers
@@ -100,7 +102,7 @@ searches:
       category_ids: [38252, 65643, 156775, 159902]   # espresso, bean-to-cup, pod, other
       radius_km: null
     gumtree:
-      category: coffee-machines
+      categories: [coffee-machines, espresso-machines]
       radius_miles: 30
 
   - name: "Ninja coffee machines (faulty)"
@@ -114,7 +116,7 @@ searches:
       category_ids: [38252, 65643, 156775, 159902]
       radius_km: null
     gumtree:
-      category: coffee-machines
+      categories: [coffee-machines, espresso-machines]
       radius_miles: 30
 
 

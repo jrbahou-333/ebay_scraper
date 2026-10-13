@@ -98,21 +98,32 @@ def search_ebay(client: EbayClient, cfg: dict, s: dict, label: str):
     return list(by_id.values())
 
 
+def gumtree_categories(g: dict) -> list[str]:
+    """`gumtree.categories` (a list), or the single `gumtree.category`."""
+    cats = g.get("categories") or g.get("category") or []
+    return [cats] if isinstance(cats, str) else list(cats)
+
+
 def search_gumtree(client: GumtreeClient, cfg: dict, s: dict, label: str):
-    """Run one search's Gumtree side: one category, the plain query, the top cap.
+    """Run one search's Gumtree side: each category in turn, the plain query, the
+    top cap, merged by item id.
 
     Gumtree's `q` has no OR syntax and no condition filter, so `repair_only` and
     the price tiers are left entirely to filters.apply.
     """
     g = source_cfg(s, "gumtree")
-    return client.search(
-        category=g["category"],
-        query=g.get("query", s.get("query")),
-        label=label,
-        max_price=top_cap(s),
-        postcode=cfg["location"]["postcode"],
-        radius_miles=g.get("radius_miles", GUMTREE_RADIUS_MILES),
-    )
+    by_id = {}
+    for category in gumtree_categories(g):
+        for x in client.search(
+            category=category,
+            query=g.get("query", s.get("query")),
+            label=label,
+            max_price=top_cap(s),
+            postcode=cfg["location"]["postcode"],
+            radius_miles=g.get("radius_miles", GUMTREE_RADIUS_MILES),
+        ):
+            by_id.setdefault(x.item_id, x)
+    return list(by_id.values())
 
 
 SEARCHERS = {"ebay": (search_ebay, EbayError), "gumtree": (search_gumtree, GumtreeError)}

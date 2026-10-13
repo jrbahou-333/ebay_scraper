@@ -175,7 +175,7 @@ class GumtreeClient:
 def _probe():
     """Run search i's Gumtree side (default 0) and print the raw results."""
     from . import config
-    from .main import search_gumtree
+    from .main import gumtree_categories, search_gumtree
 
     cfg = config.load_config()
     s = cfg["searches"][int(sys.argv[2]) if len(sys.argv) > 2 else 0]
@@ -183,7 +183,7 @@ def _probe():
     if not g:
         print(f"search {s.get('name')!r} has no gumtree: block")
         sys.exit(2)
-    print(f"Probing Gumtree: {s.get('name')!r} category={g['category']} "
+    print(f"Probing Gumtree: {s.get('name')!r} categories={gumtree_categories(g)} "
           f"query={s.get('query')!r} radius={g.get('radius_miles')}mi")
     try:
         listings = search_gumtree(GumtreeClient(), cfg, s, s.get("name") or "probe")

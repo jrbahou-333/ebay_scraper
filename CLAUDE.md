@@ -18,9 +18,10 @@ Branch `gumtree-source` (not yet merged):
 - **Gumtree is a second site for the same searches.** Each search in
   `config/searches.yaml` names its terms once (`query`, `max_price`, `premium`,
   `repair_only`) and then one block per site: `ebay: {category_ids, radius_km}`
-  and `gumtree: {category, radius_miles}`. Omit a block to skip that site.
+  and `gumtree: {categories, radius_miles}`. Omit a block to skip that site.
   Old top-level `category_ids` searches still work as eBay-only.
-- Gumtree is **local only** (30 miles, category `coffee-machines`), alerted on
+- Gumtree is **local only** (30 miles, categories `coffee-machines` +
+  `espresso-machines`, both confirmed by Jack), alerted on
   discovery, tagged "📍 Close by · Gumtree". No buyer fee and no condition
   field, so `repair_only` matches fault words in the title **or** the
   description snippet.
@@ -252,7 +253,8 @@ request code in `src/ebay.py`:
 - `condition_ids: [3000, 7000]` = Used + For parts or not working.
 - Each search: `name`, `query`, `max_price` (GBP asking price, server-side cap),
   then per-site blocks: `ebay: {category_ids, radius_km}` (ids queried one by
-  one) and `gumtree: {category, radius_miles}`. Either block may set its own
+  one) and `gumtree: {categories, radius_miles}` (each category is one request,
+  so keep the list short). Either block may set its own
   `query`. A top-level `category_ids` (old shape) means eBay-only.
 - `filters.exclude_keywords`: high-confidence *part* words that never appear in a
   whole-unit title. **Gotchas:** do NOT exclude `motor` (Dyson **Motorhead** is a

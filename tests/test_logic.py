@@ -344,6 +344,28 @@ def test_gumtree_search_paging_and_errors():
     assert fails(blocked)
 
 
+def test_gumtree_categories_queried_and_merged():
+    from src.gumtree import parse_results
+    from src.main import gumtree_categories, search_gumtree
+    assert gumtree_categories({"category": "coffee-machines"}) == ["coffee-machines"]
+    assert gumtree_categories({"categories": ["a", "b"]}) == ["a", "b"]
+
+    class FakeClient:
+        def __init__(self):
+            self.categories = []
+
+        def search(self, *, category, **kw):
+            self.categories.append(category)
+            return parse_results(GUMTREE_PAGE, kw["label"])  # same 2 listings each time
+
+    c = FakeClient()
+    s = {"query": "sage", "max_price": 50,
+         "gumtree": {"categories": ["coffee-machines", "espresso-machines"], "radius_miles": 30}}
+    got = search_gumtree(c, {"location": {"postcode": "L1 8JQ"}}, s, "sage")
+    assert c.categories == ["coffee-machines", "espresso-machines"]
+    assert sorted(x.item_id for x in got) == ["gt:1800000001", "gt:1800000002"]  # deduped
+
+
 def test_notifier_gumtree_tag():
     row = {"item_id": "gt:1", "title": "Sage Bambino", "price_minor": 4000, "currency": "GBP",
            "distance_km": None, "url": "https://www.gumtree.com/p/x/1", "source": "gumtree"}
