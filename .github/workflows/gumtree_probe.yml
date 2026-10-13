@@ -1,0 +1,22 @@
+name: gumtree-probe
+
+# One-off gate: is Gumtree reachable from GitHub's datacenter IPs?
+# Runs on push of the probe files, or by hand. Results are ::notice:: annotations.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - archive/gumtree_probe/**
+      - .github/workflows/gumtree_probe.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python archive/gumtree_probe/probe.py
