@@ -12,9 +12,9 @@ on **GitHub Actions** (cron).
 
 Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
 
-## Current status (2026-10-13): Gumtree as a second source
+## Current status (2026-10-14): Gumtree as a second source
 
-Branch `gumtree-source` (not yet merged):
+Merged to `main` 2026-10-14 (branch `gumtree-source`):
 - **Gumtree is a second site for the same searches.** Each search in
   `config/searches.yaml` names its terms once (`query`, `max_price`, `premium`,
   `repair_only`) and then one block per site: `ebay: {category_ids, radius_km}`
@@ -32,8 +32,12 @@ Branch `gumtree-source` (not yet merged):
 - First real run per site is a **silent baseline** (`state.baseline_done:<site>`),
   so adding Gumtree won't burst-alert what's already listed.
 - `--source ebay|gumtree` runs one site (e.g. a Gumtree dry run needs no eBay creds).
-- **Not yet done:** a live Gumtree dry run of the full pipeline (blocked locally
-  by the bot check at the time), merge, first real run.
+- Live Gumtree dry run of the full pipeline passed **on GitHub's IPs**
+  (`gumtree_probe.yml`, 2026-10-13): 4/4 category requests OK, Sage 3 found and
+  Ninja 2 found, all dropped (working or over £50). Kept 0 is correct: nothing
+  faulty under the caps within 30 miles at the time.
+- **Not yet done:** the first real run. It will send a one-off "✅ Gumtree
+  baseline stored: N listings" message (N likely 0) and add the `source` column.
 
 ## Earlier status (2026-10-09)
 
