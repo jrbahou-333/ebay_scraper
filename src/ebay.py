@@ -56,6 +56,7 @@ class Listing:
     is_auction: bool = False         # buyingOptions has AUCTION (possibly alongside a BIN price)
     end_date: str | None = None      # itemEndDate — set for auctions
     max_price_minor: int | None = None  # the price cap that admitted it (set by filters)
+    source: str = "ebay"             # which site: "ebay" or "gumtree" (src/gumtree.py)
 
     @property
     def price_str(self) -> str:
@@ -341,17 +342,21 @@ def _probe():
     loc = cfg["location"]
     s = cfg["searches"][int(sys.argv[2]) if len(sys.argv) > 2 else 0]
 
-    from .main import search_one
+    from .main import search_ebay, source_cfg
 
+    e = source_cfg(s, "ebay")
+    if not e:
+        print(f"search {s.get('name')!r} has no ebay: block")
+        sys.exit(2)
     client = _make_probe_client(cfg)
-    radius = s["radius_km"] if "radius_km" in s else loc["radius_km"]
+    radius = e["radius_km"] if "radius_km" in e else loc["radius_km"]
     print(
         f"Probing eBay: {s.get('name', s.get('query'))!r} "
-        f"categories={s['category_ids']} max=£{s['max_price']} premium={s.get('premium')} "
+        f"categories={e['category_ids']} max=£{s['max_price']} premium={s.get('premium')} "
         f"radius={radius or 'UK-wide'}km postcode={loc['postcode']} repair_only={s.get('repair_only', False)}"
     )
     try:
-        listings = search_one(client, cfg, s, s.get("name") or "probe")
+        listings = search_ebay(client, cfg, s, s.get("name") or "probe")
     except EbayError as e:
         print(f"\nFAILED: {e}")
         sys.exit(1)

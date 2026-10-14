@@ -1,7 +1,8 @@
 """Telegram alerts. One message per listing, with the photo when available.
 
 Deliberately minimal: price, linked title, and "Close by" when it's within
-driving range. Everything else is one tap away on the listing itself.
+driving range, plus "Gumtree" on Gumtree listings so you know which app to open.
+Everything else is one tap away on the listing itself.
 """
 
 import html
@@ -14,6 +15,12 @@ API = "https://api.telegram.org/bot{token}/{method}"
 def is_close(distance_km, pickup_km) -> bool:
     """Within collection range (by car). Unknown distance or no pickup_km → False."""
     return distance_km is not None and pickup_km is not None and distance_km <= pickup_km
+
+
+def close_by(row: dict, pickup_km) -> bool:
+    """Show "Close by"? Gumtree is always searched locally (Gumtree applies the
+    search's radius_miles itself), so its listings are close by definition."""
+    return row.get("source") == "gumtree" or is_close(row.get("distance_km"), pickup_km)
 
 
 class Notifier:
@@ -79,9 +86,12 @@ def _format(row: dict, pickup_km=None) -> str:
     if row.get("url"):
         title = f'<a href="{html.escape(row["url"], quote=True)}">{title}</a>'
 
+    tags = ["📍 Close by"] if close_by(row, pickup_km) else []
+    if row.get("source") == "gumtree":
+        tags.append("Gumtree")
     lines = [f"<b>{price} — {title}</b>"]
-    if is_close(row.get("distance_km"), pickup_km):
-        lines.append("📍 Close by")
+    if tags:
+        lines.append(" · ".join(tags))
     return "\n".join(lines)
 
 

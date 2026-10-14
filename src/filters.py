@@ -1,6 +1,6 @@
-"""Keyword filtering applied to Listings after the eBay search.
+"""Keyword filtering applied to Listings after the eBay / Gumtree searches.
 
-eBay already caps price and condition server-side, so this layer only:
+The sites already cap price (and eBay condition) server-side, so this layer only:
   - drops listings whose title matches an exclude keyword (mostly spare *parts*
     that match an appliance keyword but aren't a whole unit),
   - for `repair_only` searches, drops anything not explicitly faulty,
@@ -21,6 +21,11 @@ def _matches(title: str, keywords) -> list[str]:
     return [k for k in keywords if k.lower() in low]
 
 
+def cap_pence(pounds, source: str = "ebay") -> int:
+    """A £ cap → the most a listing may show in pence. Only eBay adds a buyer fee."""
+    return with_buyer_fee(pounds) if source == "ebay" else round(pounds * 100)
+
+
 def with_buyer_fee(pounds) -> int:
     """A £ cap → pence, plus eBay UK's Buyer Protection Fee (£0.70 + 4% for £20-£300).
 
@@ -31,12 +36,19 @@ def with_buyer_fee(pounds) -> int:
 
 
 def is_faulty(listing: Listing, filters_cfg: dict) -> bool:
-    """Condition 'For parts or not working', or a fault word in the title."""
+    """Condition 'For parts or not working', or a fault word in the title.
+
+    Gumtree has no condition field, so its description snippet is checked too
+    ("Sage Bambino" titles often hide "won't heat up" in the body).
+    """
     if str(listing.raw.get("conditionId")) == PARTS_CONDITION_ID:
         return True
     if "not working" in (listing.condition or "").lower():
         return True
-    return bool(_matches(listing.title, filters_cfg.get("fault_keywords") or []))
+    text = listing.title
+    if listing.source == "gumtree":
+        text = f"{text} {listing.raw.get('description') or ''}"
+    return bool(_matches(text, filters_cfg.get("fault_keywords") or []))
 
 
 def premium_tiers(search_cfg: dict) -> list[dict]:
@@ -74,7 +86,7 @@ def apply(listings: list[Listing], filters_cfg: dict, search_cfg: dict | None = 
             dropped += 1
             continue
         if "max_price" in search_cfg:
-            cap = with_buyer_fee(price_cap(listing.title, search_cfg))
+            cap = cap_pence(price_cap(listing.title, search_cfg), listing.source)
             if listing.price_minor is not None and listing.price_minor > cap:
                 dropped += 1
                 continue

@@ -6,12 +6,40 @@ Handoff notes for Claude Code (and humans). Read this first.
 
 A personal "sniper" that finds cheap / faulty **appliances and vacuums** to repair
 and flip, within a ~30-minute drive of **Liverpool**, and alerts new ones to
-**Telegram**. It queries the **eBay Browse API**, dedupes against a hosted
-**Postgres** (Neon), and is designed to run free on **GitHub Actions** (cron).
+**Telegram**. It queries the **eBay Browse API** and scrapes **Gumtree** search
+pages, dedupes against a hosted **Postgres** (Neon), and is designed to run free
+on **GitHub Actions** (cron).
 
 Owner: Jack (`jrbahou@gmail.com`). Solo project, greenfield.
 
-## Current status (2026-10-09)
+## Current status (2026-10-14): Gumtree as a second source
+
+Merged to `main` 2026-10-14 (branch `gumtree-source`):
+- **Gumtree is a second site for the same searches.** Each search in
+  `config/searches.yaml` names its terms once (`query`, `max_price`, `premium`,
+  `repair_only`) and then one block per site: `ebay: {category_ids, radius_km}`
+  and `gumtree: {categories, radius_miles}`. Omit a block to skip that site.
+  Old top-level `category_ids` searches still work as eBay-only.
+- Gumtree is **local only** (30 miles, categories `coffee-machines` +
+  `espresso-machines`, both confirmed by Jack), alerted on
+  discovery, tagged "📍 Close by · Gumtree". No buyer fee and no condition
+  field, so `repair_only` matches fault words in the title **or** the
+  description snippet.
+- **GitHub Actions IPs are NOT blocked** (`archive/gumtree_probe/`, 2 runs,
+  3/3 searches each, 2026-10-13). But Gumtree has **Radware bot detection**: about a
+  dozen requests in a few minutes from the home IP got HTTP 247 + a JS
+  challenge, still in force well after. See the Gumtree gotchas below.
+- First real run per site is a **silent baseline** (`state.baseline_done:<site>`),
+  so adding Gumtree won't burst-alert what's already listed.
+- `--source ebay|gumtree` runs one site (e.g. a Gumtree dry run needs no eBay creds).
+- Live Gumtree dry run of the full pipeline passed **on GitHub's IPs**
+  (`gumtree_probe.yml`, 2026-10-13): 4/4 category requests OK, Sage 3 found and
+  Ninja 2 found, all dropped (working or over £50). Kept 0 is correct: nothing
+  faulty under the caps within 30 miles at the time.
+- **Not yet done:** the first real run. It will send a one-off "✅ Gumtree
+  baseline stored: N listings" message (N likely 0) and add the `source` column.
+
+## Earlier status (2026-10-09)
 
 - **Focus is now faulty coffee machines only** (Dyson/KitchenAid commented out,
   grinders removed). Two searches, "Sage coffee machines (faulty)" and "Ninja
@@ -95,6 +123,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 python -m src.main --dry-run     # search + filter + print; NO DB writes, NO Telegram
 python -m src.ebay --probe [i]   # validate eBay contract for search index i (default 0)
+python -m src.gumtree --probe [i] # raw Gumtree results for search i (unfiltered)
+python -m src.main --dry-run --source gumtree   # one site only (ebay | gumtree)
 python -m src.main               # full run: writes to DB, sends Telegram alerts
 python -m src.auctions --dry-run # list auctions ending within the hour; no sends/marks
                                  #   (does apply idempotent schema migrations)
@@ -134,15 +164,17 @@ run. Example: `EBAY_OAUTH_TOKEN="$(cat token.txt)" python -m src.main --dry-run`
 | File | Responsibility |
 |---|---|
 | `src/ebay.py` | The ONLY module that knows eBay's shape. `EbayClient`, `search()`, `Listing` dataclass, `--probe`. |
+| `src/gumtree.py` | The ONLY module that knows Gumtree's page shape. `GumtreeClient`, `parse_results()`, `--probe`. Emits `Listing(source="gumtree", item_id="gt:<id>")`. |
 | `src/db.py` | psycopg3: `ensure_schema`, `upsert`, `is_empty`, `fetch_unnotified`, `mark_notified`, `prune`, `get_state`/`set_state`. |
-| `src/filters.py` | Keyword `exclude`/`highlight` logic over `Listing.title`. |
+| `src/filters.py` | Keyword `exclude`/`highlight` logic over `Listing.title`; price tiers (buyer fee on eBay only); `repair_only` (Gumtree also checks the description). |
 | `src/notifier.py` | Telegram `sendPhoto`/`sendMessage`, one message per listing. |
-| `src/main.py` | Orchestrator: `scrape` → `dedupe` → `upsert` → notify (Buy It Now only). `search_one` applies per-search overrides. `--dry-run`, dead-man switch, baseline guard. |
+| `src/main.py` | Orchestrator: `scrape` (searches × sites) → `dedupe` → `upsert` → notify (Buy It Now only). `source_cfg` reads a search's per-site block; `search_ebay` / `search_gumtree`. `--dry-run`, `--source`, per-site dead-man switch and baseline guard. |
 | `src/auctions.py` | Last-hour auction alerts: `fetch_ending_auctions` → `get_item` (live bid) → `send_ending`. |
 | `src/config.py` | Loads `config/searches.yaml` + `.env`; `require_env`. |
 | `config/searches.yaml` | All tuning: location, price caps, category-driven searches, keyword filters. Edited freely, reloaded each run. |
 | `schema.sql` | `listings` (PK = eBay `item_id`) + `state` tables. Applied only when its sha256 differs from `state.schema_sha256`: no-op DDL still locks `listings` and deadlocked the concurrent scrape/auctions runs (2026-10-09/10). |
 | `archive/fb_marketplace/` | Abandoned Facebook spike (see history). Not wired in. |
+| `archive/gumtree_probe/` | Standalone Gumtree reachability probe (stdlib + requests). `.github/workflows/gumtree_probe.yml` now runs `--dry-run --source gumtree` on GitHub's IPs instead (on push of `src/gumtree.py`, or by hand; no secrets). Output is a `::notice::` annotation. |
 
 ## eBay Browse API — hard-won gotchas (DON'T re-learn these)
 
@@ -185,11 +217,37 @@ request code in `src/ebay.py`:
 11. A `q` OR-group works with an AND term: `sage (faulty, broken, "not working")`.
     `q` is capped at 100 chars, so keep `fault_keywords` short.
 
+## Gumtree — gotchas
+
+1. **No API.** It parses the server-rendered `gumtree.com/search` page. The tile
+   hooks are QA attributes (`data-q="search-result"`, `search-result-anchor`,
+   `tile-title`, `tile-description`, `tile-location`, `tile-price`), steadier
+   than the generated CSS classes. Item id = the number at the end of
+   `/p/<category>/<slug>/<id>`.
+2. **Radius and price are server-side:** `distance` (MILES from
+   `search_location`) and `max_price` (whole £). No per-item distance, so every
+   result counts as "Close by".
+3. **Bot detection (Radware):** too many requests too fast → **HTTP 247** and a
+   JS challenge page (`window.rbzns`). Never try to solve it. The client raises
+   `GumtreeError`, stops making requests for the rest of the run, and eBay carries
+   on. Keep volume tiny: about 1 request per search per run, 2s apart. **Don't loop
+   probes against it while developing.** It locked the home IP out for 30+ min
+   after ~12 quick requests.
+4. **Out-of-radius padding:** sparse searches get a `data-q="nearby-results"`
+   section ("Results from outside your search") with identical tiles from far
+   away (Sheffield on a 30-mile Liverpool search). `parse_results` cuts the page
+   there. Live: Sage within 30 mi had 2 real results + 4 padded ones.
+5. A 200 without `data-q="srp"` is an error (layout change or block), never
+   "no results". An empty search still renders `srp`. A page past the end 303s.
+6. `q` has no OR syntax: keep `query` to a plain word (the brand). Fault words,
+   premium tiers and excludes are all client-side.
+7. Seller listings are personal data: test fixtures are synthetic, not saved pages.
+
 ## Config model (`config/searches.yaml`)
 
 - `location.postcode` seeds the ENDUSERCTX header. `radius_km` is enforced
   client-side. `pickup_km` drives "📍 Close by".
-- Per-search overrides: `radius_km` (null = UK-wide), `repair_only` (ignores
+- Per-search overrides: `ebay.radius_km` (null = UK-wide), `repair_only` (ignores
   `condition_ids`, uses `filters.fault_keywords`), and
   `premium`: a list of `{max_price, keywords}` tiers. The highest matching tier
   wins, and a single dict also works.
@@ -197,8 +255,11 @@ request code in `src/ebay.py`:
   longer than the auction check interval: 120 with hourly checks means alerts
   land 60–120 min before the end.
 - `condition_ids: [3000, 7000]` = Used + For parts or not working.
-- Each search: `name`, `category_ids` (list, queried one-by-one), optional
-  `query`, `max_price` (GBP, server-side cap).
+- Each search: `name`, `query`, `max_price` (GBP asking price, server-side cap),
+  then per-site blocks: `ebay: {category_ids, radius_km}` (ids queried one by
+  one) and `gumtree: {categories, radius_miles}` (each category is one request,
+  so keep the list short). Either block may set its own
+  `query`. A top-level `category_ids` (old shape) means eBay-only.
 - `filters.exclude_keywords`: high-confidence *part* words that never appear in a
   whole-unit title. **Gotchas:** do NOT exclude `motor` (Dyson **Motorhead** is a
   whole vacuum), `fan` (fan oven), `pump` (heat-pump dryer), or "spares or
@@ -238,6 +299,11 @@ GraphQL "Rate limit exceeded"), confirmed across two CI runs. Rather than run a
 self-hosted runner, pivoted to eBay's official API (IP-reputation-agnostic). The
 working FB fetcher is preserved in `archive/fb_marketplace/` as a reference for a
 possible future "FB via self-hosted runner" second source — it is NOT wired in.
+
+**Gumtree (2026-10-13)** became the second source instead: unlike FB, its
+search pages load from GitHub's IPs (`archive/gumtree_probe/`). Jack's rule: if
+GitHub ever gets blocked for good, drop Gumtree rather than adding a home runner
+or proxy.
 
 ## Secrets hygiene
 

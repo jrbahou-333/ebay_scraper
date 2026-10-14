@@ -34,6 +34,10 @@ ALTER TABLE listings ADD COLUMN IF NOT EXISTS ending_alerted_at TIMESTAMPTZ;  --
 CREATE INDEX IF NOT EXISTS listings_auction_ending ON listings (end_date)
     WHERE is_auction AND ending_alerted_at IS NULL;
 
+-- Gumtree as a second source (added 2026-10). Existing rows are eBay. Gumtree
+-- item_ids are prefixed "gt:", so they never collide with eBay's.
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'ebay';
+
 -- Small key/value store for the dead-man switch (consecutive empty runs, last alert time).
 CREATE TABLE IF NOT EXISTS state (
     key        TEXT PRIMARY KEY,

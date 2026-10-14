@@ -223,6 +223,157 @@ def test_auction_check_decisions():
     assert status == "alert" and r["price_minor"] == 3000         # stored timing + price
 
 
+# Synthetic page in Gumtree's live markup (2026-10): an inline <style> block in a
+# tile, a price split across spans, a tile with no link (skipped), a no-price tile,
+# and an out-of-radius "nearby results" tile (must be ignored).
+GUMTREE_PAGE = """<html><body><div data-q="srp">
+<div data-testid="rh-standard-card-listing" data-q="search-result">
+ <a data-q="search-result-anchor" href="/p/coffee-machines/sage-bambino-plus/1800000001" target="_blank">
+ <article><style data-emotion="css x">.css-x{width:240px;}</style>
+  <figure><img alt="Sage" src="https://img.gumtree.com/abc/def/86"/></figure>
+  <h2 data-testid="rh-standard-card-title" data-q="tile-title">Sage Bambino Plus &amp; jug</h2>
+  <p data-q="tile-description">Powers on but won&#39;t heat. Spares or repairs</p>
+  <div data-q="tile-location"><svg/><span>Bootle, Merseyside</span></div>
+  <div data-q="tile-price"><span>£</span><span>1,045.50</span></div>
+ </article></a></div>
+<div data-q="search-result"><article><h2 data-q="tile-title">Advert, no link</h2></article></div>
+<div data-q="search-result">
+ <a data-q="search-result-anchor" href="/p/coffee-machines/ninja-luxe/1800000002"><article>
+  <h2 data-q="tile-title">Ninja Luxe Cafe</h2>
+  <div data-q="tile-location"><span>Wirral</span></div>
+ </article></a></div>
+<div data-q="nearby-results"><h2 data-q="nearby-results-title">Results from outside your search</h2>
+<div data-q="search-result">
+ <a data-q="search-result-anchor" href="/p/coffee-machines/sage-oracle/1800000003"><article>
+  <h2 data-q="tile-title">Sage Oracle</h2><div data-q="tile-location"><span>Sheffield</span></div>
+ </article></a></div></div>
+</div></body></html>"""
+
+
+def test_gumtree_parse_results():
+    from src.gumtree import _to_pence as gt_pence, parse_results
+    a, b = parse_results(GUMTREE_PAGE, "sage")
+    assert a.item_id == "gt:1800000001" and a.source == "gumtree"
+    assert a.title == "Sage Bambino Plus & jug"
+    assert a.price_minor == 104550 and a.location == "Bootle, Merseyside"
+    assert a.url == "https://www.gumtree.com/p/coffee-machines/sage-bambino-plus/1800000001"
+    assert a.image_url == "https://img.gumtree.com/abc/def/86"
+    assert a.raw["description"] == "Powers on but won't heat. Spares or repairs"
+    assert a.distance_km is None and not a.is_auction and a.search_query == "sage"
+    assert b.item_id == "gt:1800000002" and b.price_minor is None and b.image_url is None
+    assert gt_pence("£ 40") == 4000 and gt_pence("Free") is None
+
+
+def test_gumtree_filters_use_description_and_no_buyer_fee():
+    from src.gumtree import parse_results
+    fcfg = {"fault_keywords": ["faulty", "spares", "not working"]}
+    scfg = {"repair_only": True, "max_price": 50}
+
+    def gt(item_id, title, price, description):
+        x = parse_results(GUMTREE_PAGE, "sage")[0]
+        x.item_id, x.title, x.price_minor = item_id, title, price
+        x.raw = {"source": "gumtree", "description": description}
+        return x
+
+    listings = [
+        gt("gt:1", "Sage Bambino", 4000, "Spares or repairs, no steam"),  # fault in body only
+        gt("gt:2", "Sage Bambino", 4000, "Lovely machine, works well"),   # working → drop
+        gt("gt:3", "Sage Bambino faulty", 5000, ""),                     # exactly £50 → in
+        gt("gt:4", "Sage Bambino faulty", 5270, ""),                     # eBay fee headroom doesn't apply
+    ]
+    kept, dropped = filters.apply(listings, fcfg, scfg)
+    assert [l.item_id for l in kept] == ["gt:1", "gt:3"] and dropped == 2
+    assert kept[0].max_price_minor == 5000
+
+    ebay = _mk("e1", "Sage Bambino", cond="Used")
+    ebay.raw["description"] = "spares"   # eBay is still judged on its title alone
+    assert not filters.is_faulty(ebay, fcfg)
+
+
+def test_source_cfg_blocks_and_legacy():
+    from src.main import make_clients, source_cfg, top_cap
+    new = {"name": "x", "query": "sage", "max_price": 50,
+           "premium": [{"max_price": 200, "keywords": ["oracle"]}],
+           "ebay": {"category_ids": [38252], "radius_km": None},
+           "gumtree": {"category": "coffee-machines", "radius_miles": 30}}
+    assert source_cfg(new, "ebay") == {"category_ids": [38252], "radius_km": None}
+    assert source_cfg(new, "gumtree")["category"] == "coffee-machines"
+    assert top_cap(new) == 200
+
+    legacy = {"name": "dyson", "category_ids": [20614], "max_price": 120}
+    assert source_cfg(legacy, "ebay") == {"category_ids": [20614]}
+    assert source_cfg(legacy, "gumtree") is None
+
+    ebay_only = {**new, "gumtree": None}
+    assert source_cfg(ebay_only, "gumtree") is None
+    # --source gumtree never builds the eBay client (so no eBay creds needed).
+    assert list(make_clients({"searches": [new, legacy]}, "gumtree")) == ["gumtree"]
+    assert make_clients({"searches": [legacy]}, "gumtree") == {}
+
+
+def test_gumtree_search_paging_and_errors():
+    from src import gumtree
+
+    class Resp:
+        def __init__(self, status, text):
+            self.status_code, self.text = status, text
+
+    def client(*responses):
+        c = gumtree.GumtreeClient()
+        queue = list(responses)
+        c._get = lambda params: queue.pop(0)  # fake only the HTTP call
+        return c
+
+    def fails(c):
+        try:
+            c.search(**kw)
+        except gumtree.GumtreeError:
+            return True
+        return False
+
+    kw = dict(category="coffee-machines", max_price=200, postcode="L1 8JQ", radius_miles=30)
+    assert len(client(Resp(200, GUMTREE_PAGE)).search(**kw)) == 2  # short page: no page 2
+    assert client(Resp(200, '<div data-q="srp"></div>')).search(**kw) == []  # genuinely empty
+    assert fails(client(Resp(200, "<html>new layout</html>")))   # 200 but no results page
+    assert fails(client(Resp(403, "denied")))
+
+    # A bot check fails this search and stops the client making any more requests.
+    blocked = client(Resp(247, "<script>window.rbzns={}</script>"))
+    assert fails(blocked) and blocked._blocked
+    del blocked._get                         # back to the real _get: must refuse offline
+    assert fails(blocked)
+
+
+def test_gumtree_categories_queried_and_merged():
+    from src.gumtree import parse_results
+    from src.main import gumtree_categories, search_gumtree
+    assert gumtree_categories({"category": "coffee-machines"}) == ["coffee-machines"]
+    assert gumtree_categories({"categories": ["a", "b"]}) == ["a", "b"]
+
+    class FakeClient:
+        def __init__(self):
+            self.categories = []
+
+        def search(self, *, category, **kw):
+            self.categories.append(category)
+            return parse_results(GUMTREE_PAGE, kw["label"])  # same 2 listings each time
+
+    c = FakeClient()
+    s = {"query": "sage", "max_price": 50,
+         "gumtree": {"categories": ["coffee-machines", "espresso-machines"], "radius_miles": 30}}
+    got = search_gumtree(c, {"location": {"postcode": "L1 8JQ"}}, s, "sage")
+    assert c.categories == ["coffee-machines", "espresso-machines"]
+    assert sorted(x.item_id for x in got) == ["gt:1800000001", "gt:1800000002"]  # deduped
+
+
+def test_notifier_gumtree_tag():
+    row = {"item_id": "gt:1", "title": "Sage Bambino", "price_minor": 4000, "currency": "GBP",
+           "distance_km": None, "url": "https://www.gumtree.com/p/x/1", "source": "gumtree"}
+    msg = notifier._format(row, pickup_km=60)
+    assert msg.endswith("\n📍 Close by · Gumtree")
+    assert notifier._format({**row, "source": "ebay"}, pickup_km=60).endswith("</b>")
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

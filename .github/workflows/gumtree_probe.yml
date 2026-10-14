@@ -1,0 +1,30 @@
+name: gumtree-probe
+
+# Is Gumtree reachable from GitHub's datacenter IPs, and does the real pipeline
+# parse it? Runs on push of the Gumtree code, or by hand. Needs no secrets: the
+# dry run touches no DB, Telegram or eBay. Results are ::notice:: annotations
+# (readable from the public API without auth).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - archive/gumtree_probe/**
+      - src/gumtree.py
+      - .github/workflows/gumtree_probe.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Gumtree dry run (the real pipeline, Gumtree only)
+        run: |
+          python -m src.main --dry-run --source gumtree 2>&1 | tee out.txt
+          # one annotation, newlines encoded as %0A
+          echo "::notice title=gumtree-dry-run::$(tail -n 25 out.txt | sed ':a;N;$!ba;s/\n/%0A/g')"
